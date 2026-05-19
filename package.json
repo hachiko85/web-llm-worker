@@ -1,0 +1,35 @@
+{
+  "name": "web-llm-worker",
+  "version": "1.0.0",
+  "description": "Singleton browser worker backend for Transformers.js WebGPU Bonsai inference.",
+  "type": "module",
+  "main": "./dist/rewrite-llm.js",
+  "module": "./dist/rewrite-llm.js",
+  "types": "./dist/types/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.types.json && node scripts/copy-usage.mjs",
+    "typecheck": "tsc --noEmit",
+    "dev": "vite --host 127.0.0.1",
+    "preview": "vite preview --host 127.0.0.1",
+    "clean": "node scripts/clean.mjs"
+  },
+  "keywords": [
+    "transformers.js",
+    "webgpu",
+    "sharedworker",
+    "bonsai",
+    "llm"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vite": "^8.0.13"
+  }
+}
