@@ -6,11 +6,13 @@ import {
   type BrokerToClientMessage,
   type ClientToBrokerMessage,
   type GenerationOptions,
+  type ModelSourceConfig,
   type PipelineInput,
   type PipelineOptions,
   type PipelineTask,
   type ProgressEvent,
   type RewriteLLMConfig,
+  type RewriteLLMGlobalConfig,
   type RunRuntimeOptions,
   type SummarizeOptions,
   type TranslateOptions
@@ -24,11 +26,13 @@ export {
   type BackendState,
   type ChatMessage,
   type GenerationOptions,
+  type ModelSourceConfig,
   type PipelineInput,
   type PipelineOptions,
   type PipelineTask,
   type ProgressEvent,
   type RewriteLLMConfig,
+  type RewriteLLMGlobalConfig,
   type RunRuntimeOptions,
   type SummarizeOptions,
   type TranslateOptions
@@ -49,6 +53,7 @@ type BackendTransport = {
 };
 
 const registryKey = "__rewriteLLMBackendRegistry_v1";
+const globalConfigKey = "RewriteLLMConfig";
 
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
 
@@ -70,6 +75,8 @@ const toError = (message: BrokerToClientMessage & { type: "error" }) => {
 
 class BackendConnection {
   readonly alias: string;
+  readonly modelSource?: ModelSourceConfig;
+  readonly workerUrl: string;
   readonly clientId = createId();
   private transport: BackendTransport;
   private pending = new Map<string, PendingRequest>();
@@ -77,8 +84,10 @@ class BackendConnection {
   private helloPromise: Promise<BackendState>;
   private helloResolve!: (state: BackendState) => void;
 
-  constructor(alias: string) {
+  constructor(alias: string, workerUrl: string, modelSource?: ModelSourceConfig) {
     this.alias = alias;
+    this.modelSource = modelSource;
+    this.workerUrl = workerUrl;
     this.helloPromise = new Promise((resolve) => {
       this.helloResolve = resolve;
     });
@@ -86,7 +95,8 @@ class BackendConnection {
     this.post({
       type: "client-hello",
       id: createId(),
-      alias
+      alias,
+      modelSource
     });
   }
 
@@ -152,8 +162,10 @@ class BackendConnection {
   }
 
   private createTransport() {
+    const workerUrl = resolveWorkerUrl(this.workerUrl);
+
     if (typeof SharedWorker !== "undefined") {
-      const worker = new SharedWorker(sharedWorkerUrl, {
+      const worker = new SharedWorker(workerUrl, {
         name: this.alias,
         type: "module"
       });
@@ -163,7 +175,7 @@ class BackendConnection {
     }
 
     if (typeof Worker !== "undefined") {
-      const worker = new Worker(sharedWorkerUrl, {
+      const worker = new Worker(workerUrl, {
         name: this.alias,
         type: "module"
       });
@@ -246,19 +258,40 @@ const getRegistry = () => {
   return globalWindow[registryKey];
 };
 
-const ensureBackend = (alias = DEFAULT_ALIAS) => {
+const getGlobalConfig = (): RewriteLLMGlobalConfig => {
+  if (!isBrowser()) {
+    return {};
+  }
+
+  return ((window as Window & { [globalConfigKey]?: RewriteLLMGlobalConfig })[globalConfigKey] ?? {});
+};
+
+const resolveWorkerUrl = (workerUrl?: string) => {
+  const resolved = new URL(workerUrl || sharedWorkerUrl, window.location.href);
+  if (resolved.origin !== window.location.origin) {
+    throw new Error(
+      `RewriteLLM workerUrl must be same-origin with the page. Received "${resolved.href}" for page origin "${window.location.origin}". Place dist/assets/rewrite-llm.shared-worker.js under the web app origin or expose it through a reverse proxy.`
+    );
+  }
+  return resolved.href;
+};
+
+const registryId = (alias: string, workerUrl?: string) => `${alias}::${resolveWorkerUrl(workerUrl)}`;
+
+const ensureBackend = (alias = DEFAULT_ALIAS, workerUrl?: string, modelSource?: ModelSourceConfig) => {
   if (!isBrowser()) {
     throw new Error("RewriteLLM can only start its browser backend in a browser context.");
   }
 
   const registry = getRegistry();
-  const existing = registry.get(alias);
+  const id = registryId(alias, workerUrl);
+  const existing = registry.get(id);
   if (existing) {
     return existing;
   }
 
-  const connection = new BackendConnection(alias);
-  registry.set(alias, connection);
+  const connection = new BackendConnection(alias, workerUrl || sharedWorkerUrl, modelSource);
+  registry.set(id, connection);
   return connection;
 };
 
@@ -285,22 +318,28 @@ export class RewriteLLM {
   readonly alias: string;
   readonly task: PipelineTask;
   readonly model: string;
+  readonly modelSource?: ModelSourceConfig;
+  readonly workerUrl?: string;
   readonly pipelineOptions: PipelineOptions;
   readonly mock: boolean;
   readonly timeoutMs?: number;
   private readonly backend: BackendConnection;
 
   constructor(config: RewriteLLMConfig = {}) {
-    this.alias = config.alias || DEFAULT_ALIAS;
+    const globalConfig = getGlobalConfig();
+
+    this.alias = config.alias || globalConfig.alias || DEFAULT_ALIAS;
     this.task = config.task || DEFAULT_TASK;
     this.model = config.model || DEFAULT_MODEL;
+    this.modelSource = config.modelSource || globalConfig.modelSource;
+    this.workerUrl = config.workerUrl || globalConfig.workerUrl;
     this.pipelineOptions = {
       ...defaultPipelineOptions(),
       ...config.pipelineOptions
     };
     this.mock = config.mock ?? false;
     this.timeoutMs = config.timeoutMs;
-    this.backend = ensureBackend(this.alias);
+    this.backend = ensureBackend(this.alias, this.workerUrl, this.modelSource);
 
     const callable = this.run.bind(this) as unknown as RewriteLLM;
     Object.setPrototypeOf(callable, new.target.prototype);
@@ -333,6 +372,7 @@ export class RewriteLLM {
       {
         task: runtime.task || this.task,
         model: runtime.model || this.model,
+        modelSource: runtime.modelSource || this.modelSource,
         input,
         generationOptions: options,
         pipelineOptions: {
@@ -415,6 +455,13 @@ export class RewriteLLM {
 }
 
 if (isBrowser()) {
-  ensureBackend(DEFAULT_ALIAS);
+  const globalConfig = getGlobalConfig();
+  if (globalConfig.autoStart !== false) {
+    try {
+      ensureBackend(globalConfig.alias || DEFAULT_ALIAS, globalConfig.workerUrl, globalConfig.modelSource);
+    } catch (error) {
+      console.warn(error);
+    }
+  }
   (window as Window & { RewriteLLM?: typeof RewriteLLM }).RewriteLLM = RewriteLLM;
 }

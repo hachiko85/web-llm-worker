@@ -1,5 +1,5 @@
-import { type BackendState, type GenerationOptions, type PipelineInput, type PipelineOptions, type PipelineTask, type RewriteLLMConfig, type RunRuntimeOptions, type SummarizeOptions, type TranslateOptions } from "./types";
-export { DEFAULT_ALIAS, DEFAULT_MODEL, DEFAULT_TASK, type BackendState, type ChatMessage, type GenerationOptions, type PipelineInput, type PipelineOptions, type PipelineTask, type ProgressEvent, type RewriteLLMConfig, type RunRuntimeOptions, type SummarizeOptions, type TranslateOptions } from "./types";
+import { type BackendState, type GenerationOptions, type ModelSourceConfig, type PipelineInput, type PipelineOptions, type PipelineTask, type RewriteLLMConfig, type RunRuntimeOptions, type SummarizeOptions, type TranslateOptions } from "./types";
+export { DEFAULT_ALIAS, DEFAULT_MODEL, DEFAULT_TASK, type BackendState, type ChatMessage, type GenerationOptions, type ModelSourceConfig, type PipelineInput, type PipelineOptions, type PipelineTask, type ProgressEvent, type RewriteLLMConfig, type RewriteLLMGlobalConfig, type RunRuntimeOptions, type SummarizeOptions, type TranslateOptions } from "./types";
 export interface RewriteLLM {
     (input: PipelineInput, options?: GenerationOptions, runtime?: RunRuntimeOptions): Promise<unknown>;
 }
@@ -7,6 +7,8 @@ export declare class RewriteLLM {
     readonly alias: string;
     readonly task: PipelineTask;
     readonly model: string;
+    readonly modelSource?: ModelSourceConfig;
+    readonly workerUrl?: string;
     readonly pipelineOptions: PipelineOptions;
     readonly mock: boolean;
     readonly timeoutMs?: number;

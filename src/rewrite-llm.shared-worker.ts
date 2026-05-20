@@ -4,6 +4,7 @@ import {
   type BrokerToClientMessage,
   type ClientToBrokerMessage,
   type EngineToBrokerMessage,
+  type ModelSourceConfig,
   type SerializedError,
   serializeError
 } from "./types";
@@ -44,11 +45,13 @@ let completedJobs = 0;
 let lastStartedAt: number | null = null;
 let lastFinishedAt: number | null = null;
 let fallbackDedicatedWorker = false;
+let modelSource: ModelSourceConfig | undefined;
 
 const state = (): BackendState => ({
   alias,
   brokerId,
   engineId,
+  modelSource: modelSource ?? null,
   clients: ports.size,
   running,
   queued: queue.length,
@@ -193,6 +196,7 @@ const handleMessage = (port: PortLike, event: MessageEvent<ClientToBrokerMessage
 
   if (message.type === "client-hello") {
     alias = message.alias || DEFAULT_ALIAS;
+    modelSource = message.modelSource || modelSource;
     send(port, { type: "hello", id: message.id, state: state() });
     broadcastState(message.id);
     return;
@@ -208,6 +212,7 @@ const handleMessage = (port: PortLike, event: MessageEvent<ClientToBrokerMessage
     return;
   }
 
+  modelSource = message.modelSource || modelSource;
   queue.push({ port, message });
   broadcastState(message.id);
   void pumpQueue();

@@ -4,6 +4,7 @@ import { defineConfig } from "vite";
 const resolvePath = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
 export default defineConfig({
+  base: "./",
   build: {
     outDir: "dist",
     emptyOutDir: true,
@@ -22,6 +23,15 @@ export default defineConfig({
         },
         chunkFileNames: "assets/[name]-[hash].js",
         assetFileNames: "assets/[name]-[hash][extname]"
+      }
+    }
+  },
+  worker: {
+    rollupOptions: {
+      output: {
+        entryFileNames: "assets/[name].js",
+        chunkFileNames: "assets/[name].js",
+        assetFileNames: "assets/[name][extname]"
       }
     }
   },

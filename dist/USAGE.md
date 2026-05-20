@@ -19,6 +19,8 @@ The production bundle is emitted to `dist/`. The main browser entry is `dist/rew
 
 The singleton guarantee is scoped by normal browser security rules: pages must load the same built script from the same origin and use the same alias. Different origins cannot share the same `SharedWorker`.
 
+For CDN-style deployment and custom model hosting, see `DEPLOYMENT_JA.md`.
+
 ## Basic use
 
 ```html

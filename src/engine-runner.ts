@@ -48,10 +48,24 @@ export const runEngineJob = async (message: EngineRunMessage, post: ProgressPost
 
   const { env, pipeline, TextStreamer } = await import("@huggingface/transformers");
 
-  env.allowRemoteModels = true;
-  env.allowLocalModels = false;
-  env.useBrowserCache = true;
-  env.useWasmCache = true;
+  const modelSource = message.modelSource;
+  env.allowRemoteModels = modelSource?.allowRemoteModels ?? true;
+  env.allowLocalModels = modelSource?.allowLocalModels ?? false;
+  env.useBrowserCache = modelSource?.useBrowserCache ?? true;
+  env.useWasmCache = modelSource?.useWasmCache ?? true;
+
+  if (modelSource?.remoteHost) {
+    env.remoteHost = modelSource.remoteHost;
+  }
+  if (modelSource?.remotePathTemplate) {
+    env.remotePathTemplate = modelSource.remotePathTemplate;
+  }
+  if (modelSource?.localModelPath) {
+    env.localModelPath = modelSource.localModelPath;
+  }
+  if (modelSource?.cacheKey) {
+    env.cacheKey = modelSource.cacheKey;
+  }
 
   if (!navigator.gpu && message.pipelineOptions?.device !== "wasm") {
     throw new Error(

@@ -23,6 +23,7 @@ export type BackendState = {
     alias: string;
     brokerId: string;
     engineId: string | null;
+    modelSource: ModelSourceConfig | null;
     clients: number;
     running: boolean;
     queued: number;
@@ -45,17 +46,36 @@ export type PipelineOptions = {
     session_options?: Record<string, unknown>;
 };
 export type GenerationOptions = Record<string, unknown>;
+export type ModelSourceConfig = {
+    remoteHost?: string;
+    remotePathTemplate?: string;
+    localModelPath?: string;
+    allowRemoteModels?: boolean;
+    allowLocalModels?: boolean;
+    useBrowserCache?: boolean;
+    useWasmCache?: boolean;
+    cacheKey?: string;
+};
 export type RewriteLLMConfig = {
     alias?: string;
     task?: PipelineTask;
     model?: string;
+    modelSource?: ModelSourceConfig;
+    workerUrl?: string;
     pipelineOptions?: PipelineOptions;
     mock?: boolean;
     timeoutMs?: number;
 };
+export type RewriteLLMGlobalConfig = {
+    alias?: string;
+    autoStart?: boolean;
+    modelSource?: ModelSourceConfig;
+    workerUrl?: string;
+};
 export type RunRuntimeOptions = {
     task?: PipelineTask;
     model?: string;
+    modelSource?: ModelSourceConfig;
     pipelineOptions?: PipelineOptions;
     mock?: boolean;
     timeoutMs?: number;
@@ -73,6 +93,7 @@ export type ClientToBrokerMessage = {
     type: "client-hello";
     id: string;
     alias: string;
+    modelSource?: ModelSourceConfig;
 } | {
     type: "get-state";
     id: string;
@@ -84,6 +105,7 @@ export type ClientToBrokerMessage = {
     id: string;
     task: PipelineTask;
     model: string;
+    modelSource?: ModelSourceConfig;
     input: PipelineInput;
     generationOptions?: GenerationOptions;
     pipelineOptions?: PipelineOptions;
