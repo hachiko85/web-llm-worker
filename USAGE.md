@@ -111,6 +111,35 @@ http://127.0.0.1:5173/test-sites/
 
 The page loads Test Site A and Test Site B side by side. Both should show the same `brokerId` and the client count should increase as both frames connect. The default test UI uses Mock mode so you can verify Worker singleton behavior without downloading the 2.25 GB model. Turn Mock mode off in a WebGPU-capable browser to run the real Bonsai model.
 
+You can also run the built `dist` project with the standalone Node test server:
+
+```powershell
+npm run build
+npm run serve:test
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8787/test-sites/
+```
+
+This server serves `dist` directly and adds COOP/COEP headers for browser-side worker and WebGPU diagnostics.
+
+## Metrics
+
+`RewriteLLM` exposes worker/page metrics:
+
+```ts
+const metrics = await llm.metrics();
+console.log(metrics.worker.usedJSHeapSize);
+console.log(metrics.worker.jsHeapSizeLimit);
+console.log(metrics.page?.userAgentSpecificMemory);
+console.log(metrics.worker.deviceMemoryGB);
+```
+
+Browser memory APIs are intentionally limited. In Chromium, `performance.memory` may expose JS heap usage and heap limit. When available, `performance.measureUserAgentSpecificMemory()` is also sampled from the page context. Other browsers may return `n/a`, in which case the metrics object includes explanatory notes. GPU memory used by WebGPU is not directly exposed by standard browser APIs.
+
 ## Runtime behavior
 
 1. Loading `rewrite-llm.js` starts a backend connection for the default alias.

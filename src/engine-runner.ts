@@ -17,7 +17,13 @@ const createMockResult = async (message: EngineRunMessage, post: ProgressPost) =
   const lower = inputText.toLowerCase();
 
   let generated = "Mock response from the singleton Bonsai backend.";
-  if (lower.includes("infer") || lower.includes("推論")) {
+  if (lower.includes("推論してください") || lower.includes("infer the following")) {
+    generated = "推論: 与えられた条件から、最も自然な次の一手を選びます。";
+  } else if (lower.includes("summarization engine") || lower.includes("summarize the following")) {
+    generated = "要約: 入力文の主旨を短くまとめ、重要な点だけを残しました。";
+  } else if (lower.includes("translation engine") || lower.includes("translate from")) {
+    generated = "翻訳: This text was translated by the mock backend.";
+  } else if (lower.includes("infer") || lower.includes("推論")) {
     generated = "推論: 与えられた条件から、最も自然な次の一手を選びます。";
   } else if (lower.includes("translate") || lower.includes("翻訳")) {
     generated = "翻訳: This text was translated by the mock backend.";

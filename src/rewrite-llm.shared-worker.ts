@@ -4,7 +4,9 @@ import {
   type BrokerToClientMessage,
   type ClientToBrokerMessage,
   type EngineToBrokerMessage,
+  type MemoryMetricSnapshot,
   type ModelSourceConfig,
+  type RewriteLLMMetrics,
   type SerializedError,
   serializeError
 } from "./types";
@@ -60,6 +62,69 @@ const state = (): BackendState => ({
   lastFinishedAt,
   webgpu: Boolean(navigator.gpu),
   fallbackDedicatedWorker
+});
+
+const collectWorkerMetrics = async (): Promise<MemoryMetricSnapshot> => {
+  const performanceWithMemory = performance as Performance & {
+    memory?: {
+      jsHeapSizeLimit?: number;
+      totalJSHeapSize?: number;
+      usedJSHeapSize?: number;
+    };
+    measureUserAgentSpecificMemory?: () => Promise<{ bytes?: number }>;
+  };
+  const navigatorWithMemory = navigator as Navigator & {
+    deviceMemory?: number;
+    storage?: {
+      estimate?: () => Promise<{ quota?: number; usage?: number }>;
+    };
+  };
+  const storageEstimate = await navigatorWithMemory.storage?.estimate?.();
+  const userAgentMemory = await performanceWithMemory.measureUserAgentSpecificMemory?.().catch((error: unknown) => {
+    return {
+      error
+    };
+  });
+  const memory = performanceWithMemory.memory;
+  const notes: string[] = [];
+
+  if (!memory) {
+    notes.push("performance.memory is not available inside this worker.");
+  }
+  if (navigatorWithMemory.deviceMemory === undefined) {
+    notes.push("navigator.deviceMemory is not available inside this worker.");
+  }
+  if (!performanceWithMemory.measureUserAgentSpecificMemory) {
+    notes.push("performance.measureUserAgentSpecificMemory is not available inside this worker.");
+  } else if (userAgentMemory && "error" in userAgentMemory) {
+    notes.push("performance.measureUserAgentSpecificMemory failed inside this worker.");
+  }
+
+  return {
+    context: "broker-worker",
+    capturedAt: Date.now(),
+    supported: {
+      performanceMemory: Boolean(memory),
+      userAgentSpecificMemory: Boolean(userAgentMemory && !("error" in userAgentMemory)),
+      deviceMemory: navigatorWithMemory.deviceMemory !== undefined,
+      storageEstimate: Boolean(storageEstimate)
+    },
+    jsHeapSizeLimit: memory?.jsHeapSizeLimit,
+    totalJSHeapSize: memory?.totalJSHeapSize,
+    usedJSHeapSize: memory?.usedJSHeapSize,
+    userAgentSpecificMemory: userAgentMemory && !("error" in userAgentMemory) ? userAgentMemory.bytes : undefined,
+    deviceMemoryGB: navigatorWithMemory.deviceMemory,
+    hardwareConcurrency: navigator.hardwareConcurrency,
+    storageQuota: storageEstimate?.quota,
+    storageUsage: storageEstimate?.usage,
+    crossOriginIsolated: self.crossOriginIsolated,
+    notes
+  };
+};
+
+const collectMetrics = async (): Promise<RewriteLLMMetrics> => ({
+  state: state(),
+  worker: await collectWorkerMetrics()
 });
 
 const send = (port: PortLike, message: BrokerToClientMessage) => {
@@ -204,6 +269,13 @@ const handleMessage = (port: PortLike, event: MessageEvent<ClientToBrokerMessage
 
   if (message.type === "get-state") {
     send(port, { type: "state", id: message.id, state: state() });
+    return;
+  }
+
+  if (message.type === "get-metrics") {
+    void collectMetrics().then((metrics) => {
+      send(port, { type: "metrics", id: message.id, metrics });
+    });
     return;
   }
 

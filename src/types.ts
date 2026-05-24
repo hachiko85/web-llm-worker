@@ -49,6 +49,37 @@ export type BackendState = {
   fallbackDedicatedWorker: boolean;
 };
 
+export type MemoryMetricSnapshot = {
+  context: "page" | "broker-worker";
+  capturedAt: number;
+  supported: {
+    performanceMemory: boolean;
+    userAgentSpecificMemory: boolean;
+    deviceMemory: boolean;
+    storageEstimate: boolean;
+  };
+  jsHeapSizeLimit?: number;
+  totalJSHeapSize?: number;
+  usedJSHeapSize?: number;
+  userAgentSpecificMemory?: number;
+  deviceMemoryGB?: number;
+  hardwareConcurrency?: number;
+  storageQuota?: number;
+  storageUsage?: number;
+  crossOriginIsolated: boolean;
+  notes: string[];
+};
+
+export type RewriteLLMMetrics = {
+  state: BackendState;
+  worker: MemoryMetricSnapshot;
+  page?: MemoryMetricSnapshot;
+};
+
+export type MetricsOptions = {
+  includePage?: boolean;
+};
+
 export type PipelineOptions = {
   device?: "webgpu" | "wasm" | "webnn" | "cpu" | string;
   dtype?: string | Record<string, string>;
@@ -125,6 +156,10 @@ export type ClientToBrokerMessage =
       id: string;
     }
   | {
+      type: "get-metrics";
+      id: string;
+    }
+  | {
       type: "restart-engine";
       id: string;
     }
@@ -150,6 +185,11 @@ export type BrokerToClientMessage =
       type: "state";
       id?: string;
       state: BackendState;
+    }
+  | {
+      type: "metrics";
+      id: string;
+      metrics: RewriteLLMMetrics;
     }
   | {
       type: "progress";

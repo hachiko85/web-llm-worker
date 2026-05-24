@@ -6,6 +6,8 @@ import {
   type BrokerToClientMessage,
   type ClientToBrokerMessage,
   type GenerationOptions,
+  type MemoryMetricSnapshot,
+  type MetricsOptions,
   type ModelSourceConfig,
   type PipelineInput,
   type PipelineOptions,
@@ -13,6 +15,7 @@ import {
   type ProgressEvent,
   type RewriteLLMConfig,
   type RewriteLLMGlobalConfig,
+  type RewriteLLMMetrics,
   type RunRuntimeOptions,
   type SummarizeOptions,
   type TranslateOptions
@@ -26,6 +29,8 @@ export {
   type BackendState,
   type ChatMessage,
   type GenerationOptions,
+  type MemoryMetricSnapshot,
+  type MetricsOptions,
   type ModelSourceConfig,
   type PipelineInput,
   type PipelineOptions,
@@ -33,6 +38,7 @@ export {
   type ProgressEvent,
   type RewriteLLMConfig,
   type RewriteLLMGlobalConfig,
+  type RewriteLLMMetrics,
   type RunRuntimeOptions,
   type SummarizeOptions,
   type TranslateOptions
@@ -44,6 +50,7 @@ type PendingRequest = {
   onProgress?: (event: ProgressEvent) => void;
   onStatus?: (state: BackendState) => void;
   expectsStateResult?: boolean;
+  expectsMetricsResult?: boolean;
   timeoutId?: number;
 };
 
@@ -125,6 +132,10 @@ class BackendConnection {
     return this.request({ type: "get-state" }, {});
   }
 
+  getMetrics() {
+    return this.request({ type: "get-metrics" }, {});
+  }
+
   restartEngine() {
     return this.request({ type: "restart-engine" }, {});
   }
@@ -142,7 +153,8 @@ class BackendConnection {
         reject,
         onProgress: callbacks.onProgress,
         onStatus: callbacks.onStatus,
-        expectsStateResult: partial.type === "get-state" || partial.type === "restart-engine"
+        expectsStateResult: partial.type === "get-state" || partial.type === "restart-engine",
+        expectsMetricsResult: partial.type === "get-metrics"
       };
 
       if (callbacks.timeoutMs && callbacks.timeoutMs > 0) {
@@ -213,6 +225,11 @@ class BackendConnection {
 
     if (message.type === "result") {
       this.resolve(message.id, message.result);
+      return;
+    }
+
+    if (message.type === "metrics") {
+      this.resolve(message.id, message.metrics);
       return;
     }
 
@@ -310,6 +327,64 @@ const extractGeneratedText = (result: unknown) => {
   return typeof result === "string" ? result : JSON.stringify(result, null, 2);
 };
 
+const collectPageMetrics = async (): Promise<MemoryMetricSnapshot> => {
+  const performanceWithMemory = performance as Performance & {
+    memory?: {
+      jsHeapSizeLimit?: number;
+      totalJSHeapSize?: number;
+      usedJSHeapSize?: number;
+    };
+    measureUserAgentSpecificMemory?: () => Promise<{ bytes?: number }>;
+  };
+  const navigatorWithMemory = navigator as Navigator & {
+    deviceMemory?: number;
+    storage?: {
+      estimate?: () => Promise<{ quota?: number; usage?: number }>;
+    };
+  };
+  const storageEstimate = await navigatorWithMemory.storage?.estimate?.();
+  const userAgentMemory = await performanceWithMemory.measureUserAgentSpecificMemory?.().catch((error: unknown) => {
+    return {
+      error
+    };
+  });
+  const memory = performanceWithMemory.memory;
+  const notes: string[] = [];
+
+  if (!memory) {
+    notes.push("performance.memory is not available in this browser context.");
+  }
+  if (navigatorWithMemory.deviceMemory === undefined) {
+    notes.push("navigator.deviceMemory is not available in this browser context.");
+  }
+  if (!performanceWithMemory.measureUserAgentSpecificMemory) {
+    notes.push("performance.measureUserAgentSpecificMemory is not available in this browser context.");
+  } else if (userAgentMemory && "error" in userAgentMemory) {
+    notes.push("performance.measureUserAgentSpecificMemory failed in this browser context.");
+  }
+
+  return {
+    context: "page",
+    capturedAt: Date.now(),
+    supported: {
+      performanceMemory: Boolean(memory),
+      userAgentSpecificMemory: Boolean(userAgentMemory && !("error" in userAgentMemory)),
+      deviceMemory: navigatorWithMemory.deviceMemory !== undefined,
+      storageEstimate: Boolean(storageEstimate)
+    },
+    jsHeapSizeLimit: memory?.jsHeapSizeLimit,
+    totalJSHeapSize: memory?.totalJSHeapSize,
+    usedJSHeapSize: memory?.usedJSHeapSize,
+    userAgentSpecificMemory: userAgentMemory && !("error" in userAgentMemory) ? userAgentMemory.bytes : undefined,
+    deviceMemoryGB: navigatorWithMemory.deviceMemory,
+    hardwareConcurrency: navigator.hardwareConcurrency,
+    storageQuota: storageEstimate?.quota,
+    storageUsage: storageEstimate?.usage,
+    crossOriginIsolated: window.crossOriginIsolated,
+    notes
+  };
+};
+
 export interface RewriteLLM {
   (input: PipelineInput, options?: GenerationOptions, runtime?: RunRuntimeOptions): Promise<unknown>;
 }
@@ -361,6 +436,19 @@ export class RewriteLLM {
 
   state() {
     return this.backend.getState() as Promise<BackendState>;
+  }
+
+  async metrics(options: MetricsOptions = {}) {
+    const includePage = options.includePage ?? true;
+    const metrics = (await this.backend.getMetrics()) as RewriteLLMMetrics;
+    if (!includePage) {
+      return metrics;
+    }
+
+    return {
+      ...metrics,
+      page: await collectPageMetrics()
+    };
   }
 
   restartEngine() {

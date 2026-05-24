@@ -168,7 +168,8 @@ pre {
   word-break: break-word;
 }
 
-.telemetry {
+.telemetry,
+.metrics-grid {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -176,7 +177,8 @@ pre {
   max-width: 1180px;
 }
 
-.telemetry div {
+.telemetry div,
+.metrics-grid div {
   background: #ffffff;
   border: 1px solid #cfd9dd;
   border-radius: 8px;
@@ -184,7 +186,8 @@ pre {
   padding: 12px;
 }
 
-.telemetry span {
+.telemetry span,
+.metrics-grid span {
   color: #65727b;
   display: block;
   font-size: 12px;
@@ -192,11 +195,35 @@ pre {
   margin-bottom: 4px;
 }
 
-.telemetry strong {
+.telemetry strong,
+.metrics-grid strong {
   display: block;
   font-family: "Cascadia Mono", "Consolas", monospace;
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.metrics {
+  margin: 18px auto 0;
+  max-width: 1180px;
+}
+
+.metrics-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.metrics-header span {
+  color: #65727b;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.metrics pre {
+  margin-top: 10px;
+  min-height: 96px;
 }
 
 @media (max-width: 820px) {
@@ -214,7 +241,8 @@ pre {
   }
 
   .workspace,
-  .telemetry {
+  .telemetry,
+  .metrics-grid {
     grid-template-columns: 1fr;
   }
 }

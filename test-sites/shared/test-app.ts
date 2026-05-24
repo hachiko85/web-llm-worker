@@ -1,4 +1,4 @@
-import { RewriteLLM, type BackendState, type ProgressEvent } from "../../src/index";
+import { RewriteLLM, type BackendState, type MemoryMetricSnapshot, type ProgressEvent, type RewriteLLMMetrics } from "../../src/index";
 import "./test-app.css";
 
 type Action = "summarize" | "translate" | "infer";
@@ -35,6 +35,7 @@ app.innerHTML = `
           <button type="button" data-action="translate">翻訳</button>
           <button type="button" data-action="infer">推論</button>
           <button type="button" data-action="state">状態更新</button>
+          <button type="button" data-action="metrics">メトリクス更新</button>
         </div>
         <label class="toggle">
           <input data-mock type="checkbox" checked />
@@ -69,6 +70,52 @@ app.innerHTML = `
         <strong data-queue>0</strong>
       </div>
     </section>
+
+    <section class="metrics">
+      <div class="metrics-header">
+        <h2>Worker metrics</h2>
+        <span data-metrics-time>not sampled</span>
+      </div>
+      <div class="metrics-grid">
+        <div>
+          <span>worker heap used</span>
+          <strong data-worker-heap-used>n/a</strong>
+        </div>
+        <div>
+          <span>worker heap limit</span>
+          <strong data-worker-heap-limit>n/a</strong>
+        </div>
+        <div>
+          <span>page heap used</span>
+          <strong data-page-heap-used>n/a</strong>
+        </div>
+        <div>
+          <span>page heap limit</span>
+          <strong data-page-heap-limit>n/a</strong>
+        </div>
+        <div>
+          <span>agent memory</span>
+          <strong data-agent-memory>n/a</strong>
+        </div>
+        <div>
+          <span>device memory</span>
+          <strong data-device-memory>n/a</strong>
+        </div>
+        <div>
+          <span>storage usage</span>
+          <strong data-storage-usage>n/a</strong>
+        </div>
+        <div>
+          <span>storage quota</span>
+          <strong data-storage-quota>n/a</strong>
+        </div>
+        <div>
+          <span>isolation</span>
+          <strong data-isolation>n/a</strong>
+        </div>
+      </div>
+      <pre data-metrics-notes>No metrics sampled yet.</pre>
+    </section>
   </main>
 `;
 
@@ -83,6 +130,17 @@ const brokerId = app.querySelector<HTMLElement>("[data-broker-id]")!;
 const engineId = app.querySelector<HTMLElement>("[data-engine-id]")!;
 const completed = app.querySelector<HTMLElement>("[data-completed]")!;
 const queue = app.querySelector<HTMLElement>("[data-queue]")!;
+const metricsTime = app.querySelector<HTMLElement>("[data-metrics-time]")!;
+const workerHeapUsed = app.querySelector<HTMLElement>("[data-worker-heap-used]")!;
+const workerHeapLimit = app.querySelector<HTMLElement>("[data-worker-heap-limit]")!;
+const pageHeapUsed = app.querySelector<HTMLElement>("[data-page-heap-used]")!;
+const pageHeapLimit = app.querySelector<HTMLElement>("[data-page-heap-limit]")!;
+const agentMemory = app.querySelector<HTMLElement>("[data-agent-memory]")!;
+const deviceMemory = app.querySelector<HTMLElement>("[data-device-memory]")!;
+const storageUsage = app.querySelector<HTMLElement>("[data-storage-usage]")!;
+const storageQuota = app.querySelector<HTMLElement>("[data-storage-quota]")!;
+const isolation = app.querySelector<HTMLElement>("[data-isolation]")!;
+const metricsNotes = app.querySelector<HTMLElement>("[data-metrics-notes]")!;
 
 const llm = new RewriteLLM({
   mock: true,
@@ -98,6 +156,59 @@ const paintState = (state: BackendState) => {
   completed.textContent = String(state.completedJobs);
   queue.textContent = String(state.queued);
   running.textContent = state.running ? "running" : "idle";
+};
+
+const formatBytes = (value?: number) => {
+  if (!Number.isFinite(value)) {
+    return "n/a";
+  }
+
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value || 0;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+};
+
+const metricNotes = (label: string, snapshot?: MemoryMetricSnapshot) => {
+  if (!snapshot) {
+    return [`${label}: not available`];
+  }
+
+  const notes = snapshot.notes.length > 0 ? snapshot.notes : ["all exposed metrics are available"];
+  return notes.map((note) => `${label}: ${note}`);
+};
+
+const paintMetrics = (metrics: RewriteLLMMetrics) => {
+  const worker = metrics.worker;
+  const page = metrics.page;
+  metricsTime.textContent = new Date(worker.capturedAt).toLocaleTimeString();
+  workerHeapUsed.textContent = formatBytes(worker.usedJSHeapSize);
+  workerHeapLimit.textContent = formatBytes(worker.jsHeapSizeLimit);
+  pageHeapUsed.textContent = formatBytes(page?.usedJSHeapSize);
+  pageHeapLimit.textContent = formatBytes(page?.jsHeapSizeLimit);
+  agentMemory.textContent = formatBytes(page?.userAgentSpecificMemory ?? worker.userAgentSpecificMemory);
+  deviceMemory.textContent = worker.deviceMemoryGB ? `${worker.deviceMemoryGB} GB` : "n/a";
+  storageUsage.textContent = formatBytes(worker.storageUsage ?? page?.storageUsage);
+  storageQuota.textContent = formatBytes(worker.storageQuota ?? page?.storageQuota);
+  isolation.textContent = `worker: ${worker.crossOriginIsolated ? "isolated" : "not isolated"} / page: ${page?.crossOriginIsolated ? "isolated" : "not isolated"}`;
+  metricsNotes.textContent = [
+    ...metricNotes("worker", worker),
+    ...metricNotes("page", page)
+  ].join("\n");
+};
+
+const refreshMetrics = async () => {
+  try {
+    const metrics = await llm.metrics();
+    paintMetrics(metrics);
+  } catch (error) {
+    metricsTime.textContent = "metrics error";
+    metricsNotes.textContent = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  }
 };
 
 const appendProgress = (event: ProgressEvent) => {
@@ -132,6 +243,7 @@ const runAction = async (action: Action) => {
   } finally {
     const state = await llm.state();
     paintState(state);
+    await refreshMetrics();
   }
 };
 
@@ -144,9 +256,17 @@ app.addEventListener("click", (event) => {
     return;
   }
 
+  if (action === "metrics") {
+    void refreshMetrics();
+    return;
+  }
+
   if (action === "summarize" || action === "translate" || action === "infer") {
     void runAction(action);
   }
 });
 
-void llm.ready().then(paintState);
+void llm.ready().then((state) => {
+  paintState(state);
+  void refreshMetrics();
+});
