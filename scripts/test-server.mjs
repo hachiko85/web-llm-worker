@@ -70,6 +70,44 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    const rangeHeader = request.headers.range;
+    if (rangeHeader) {
+      const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/);
+      if (!match) {
+        response.writeHead(416, {
+          ...headers(contentTypes.get(extname(filePath)) || "application/octet-stream"),
+          "Content-Range": `bytes */${info.size}`
+        });
+        response.end();
+        return;
+      }
+
+      const start = match[1] ? Number(match[1]) : 0;
+      const end = match[2] ? Number(match[2]) : info.size - 1;
+      if (start >= info.size || end >= info.size || start > end) {
+        response.writeHead(416, {
+          ...headers(contentTypes.get(extname(filePath)) || "application/octet-stream"),
+          "Content-Range": `bytes */${info.size}`
+        });
+        response.end();
+        return;
+      }
+
+      response.writeHead(206, {
+        ...headers(contentTypes.get(extname(filePath)) || "application/octet-stream"),
+        "Content-Length": end - start + 1,
+        "Content-Range": `bytes ${start}-${end}/${info.size}`
+      });
+
+      if (request.method === "HEAD") {
+        response.end();
+        return;
+      }
+
+      createReadStream(filePath, { start, end }).pipe(response);
+      return;
+    }
+
     response.writeHead(200, {
       ...headers(contentTypes.get(extname(filePath)) || "application/octet-stream"),
       "Content-Length": info.size

@@ -115,6 +115,15 @@ Place files under:
 dist/models/onnx-community/Ternary-Bonsai-4B-ONNX/resolve/main/
 ```
 
+Download the default q2f16 mirror files locally:
+
+```powershell
+npm run download:model:q2f16
+npm run build
+npm run serve:test
+npm run verify:model-serving
+```
+
 See `HOW_TO_USE_JA.md` for the full Japanese setup notes.
 
 ## Persistence mode

@@ -94,6 +94,29 @@ https://your-site.example.com/models/onnx-community/Ternary-Bonsai-4B-ONNX/resol
 
 `public/models/onnx-community/Ternary-Bonsai-4B-ONNX/resolve/main/MIRROR_README.txt` は配置確認用のプレースホルダーです。実モデルをテストする場合は同じディレクトリに Hugging Face の実ファイルを配置してください。
 
+デフォルトの `q2f16` に必要なファイルをダウンロードする場合:
+
+```powershell
+npm run download:model:q2f16
+npm run build
+npm run serve:test
+npm run verify:model-serving
+```
+
+このスクリプトは以下を取得します。
+
+```text
+chat_template.jinja
+config.json
+generation_config.json
+tokenizer.json
+tokenizer_config.json
+onnx/model_q2f16.onnx
+onnx/model_q2f16.onnx_data
+```
+
+`model_q2f16.onnx_data` は約 1.09GB あります。GitHub には push しないよう `.gitignore` で除外しています。
+
 ## 永続化モード
 
 既定では推論完了後に pipeline を破棄し、メモリ常駐を抑えます。

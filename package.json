@@ -14,7 +14,9 @@
     "typecheck": "tsc --noEmit",
     "dev": "vite --host 127.0.0.1",
     "preview": "vite preview --host 127.0.0.1",
+    "download:model:q2f16": "node scripts/download-bonsai-q2f16.mjs",
     "serve:test": "node scripts/test-server.mjs",
+    "verify:model-serving": "node scripts/verify-model-serving.mjs",
     "verify:browser": "node scripts/verify-browser.mjs",
     "clean": "node scripts/clean.mjs"
   },

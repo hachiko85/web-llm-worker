@@ -8,3 +8,17 @@ Thumbs.db
 .vite/
 coverage/
 dist/verification/
+public/models/**/onnx/*.onnx
+public/models/**/onnx/*.onnx_data
+public/models/**/config.json
+public/models/**/generation_config.json
+public/models/**/tokenizer.json
+public/models/**/tokenizer_config.json
+public/models/**/chat_template.jinja
+dist/models/**/onnx/*.onnx
+dist/models/**/onnx/*.onnx_data
+dist/models/**/config.json
+dist/models/**/generation_config.json
+dist/models/**/tokenizer.json
+dist/models/**/tokenizer_config.json
+dist/models/**/chat_template.jinja
