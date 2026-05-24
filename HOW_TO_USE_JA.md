@@ -199,7 +199,7 @@ const searchTool = {
       properties: {
         keyword: {
           type: "string",
-          description: "検索キーワード"
+          description: "検索キーワード。「お祭り」は「祭り」に正規化する。"
         },
         "ins-from": {
           type: "string",
@@ -260,6 +260,26 @@ const args = await llm.extractToolArguments(
   }
 );
 ```
+
+### tool call の失敗処理
+
+`extractToolCall()` は、モデルが `<tool_call>` 形式または同等の JSON tool call を返し、かつ JSON パースとツール名検証に成功した場合だけ成功します。通常文、壊れた JSON、未定義のツール名は `ToolCallParseError` として失敗します。
+
+```ts
+try {
+  const call = await llm.extractToolCall(question, searchTool, {
+    currentDate: "2026-05-24"
+  });
+  runSearch(call.arguments);
+} catch (error) {
+  if (error instanceof ToolCallParseError) {
+    console.error(error.reason);
+    console.error(error.raw);
+  }
+}
+```
+
+モデルの raw 出力だけを後から確認したい場合は `RewriteLLM.parseToolCall(raw, tools)` を使えます。
 
 注意点:
 

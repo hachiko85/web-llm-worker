@@ -193,7 +193,7 @@ const articleSearchTool: RewriteLLMTool = {
       properties: {
         keyword: {
           type: "string",
-          description: "検索キーワード。自然な日本語から名詞句だけを短く抽出する。"
+          description: "検索キーワード。自然な日本語から名詞句だけを短く抽出する。「お祭り」は「祭り」に正規化する。"
         },
         "ins-from": {
           type: "string",

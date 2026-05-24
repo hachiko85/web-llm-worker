@@ -476,50 +476,88 @@ const extractToolCallPayload = (raw: string) => {
   return match?.[1]?.trim() || raw;
 };
 
+export class ToolCallParseError extends Error {
+  readonly raw: string;
+  readonly reason: string;
+
+  constructor(reason: string, raw: string, cause?: unknown) {
+    super(`RewriteLLM tool call parse failed: ${reason}`);
+    this.name = "ToolCallParseError";
+    this.raw = raw;
+    this.reason = reason;
+    if (cause !== undefined) {
+      (this as Error & { cause?: unknown }).cause = cause;
+    }
+  }
+}
+
 const toArgumentsObject = (value: unknown): Record<string, JsonValue> => {
-  const parsed = typeof value === "string" ? JSON.parse(value) : value;
+  let parsed: unknown;
+  try {
+    parsed = typeof value === "string" ? JSON.parse(value) : value;
+  } catch (error) {
+    throw new Error("Tool call arguments were a string, but not valid JSON.", { cause: error });
+  }
   if (!isRecord(parsed)) {
     throw new Error("RewriteLLM tool call arguments must be a JSON object.");
   }
   return parsed as Record<string, JsonValue>;
 };
 
-const normalizeToolCallResult = (parsed: JsonValue, raw: string): ToolCallResult => {
+const normalizeToolCallResult = (parsed: JsonValue, raw: string, expectedNames: Set<string>): ToolCallResult => {
   if (!isRecord(parsed)) {
     throw new Error("RewriteLLM tool call output must be a JSON object.");
   }
 
+  let name: string | null = null;
+  let args: Record<string, JsonValue> | null = null;
+
   if (typeof parsed.name === "string" && "arguments" in parsed) {
-    return {
-      name: parsed.name,
-      arguments: toArgumentsObject(parsed.arguments),
-      raw
-    };
-  }
-
-  if (typeof parsed.tool === "string" && "arguments" in parsed) {
-    return {
-      name: parsed.tool,
-      arguments: toArgumentsObject(parsed.arguments),
-      raw
-    };
-  }
-
-  if (Array.isArray(parsed.tool_calls) && parsed.tool_calls.length > 0) {
+    name = parsed.name;
+    args = toArgumentsObject(parsed.arguments);
+  } else if (typeof parsed.tool === "string" && "arguments" in parsed) {
+    name = parsed.tool;
+    args = toArgumentsObject(parsed.arguments);
+  } else if (Array.isArray(parsed.tool_calls) && parsed.tool_calls.length > 0) {
     const first = parsed.tool_calls[0];
     if (isRecord(first)) {
       const fn = isRecord(first.function) ? first.function : first;
       if (typeof fn.name === "string" && "arguments" in fn) {
-        return {
-          name: fn.name,
-          arguments: toArgumentsObject(fn.arguments),
-          raw
-        };
+        name = fn.name;
+        args = toArgumentsObject(fn.arguments);
       }
     }
   }
 
-  throw new Error('RewriteLLM tool call output must contain {"name": "...", "arguments": {...}}.');
+  if (!name || !args) {
+    throw new Error('RewriteLLM tool call output must contain {"name": "...", "arguments": {...}}.');
+  }
+
+  if (!expectedNames.has(name)) {
+    throw new Error(`RewriteLLM tool call selected unknown tool "${name}".`);
+  }
+
+  return {
+    name,
+    arguments: args,
+    raw
+  };
+};
+
+const parseToolCallResult = (raw: string, expectedNames: Set<string>): ToolCallResult => {
+  const payload = extractToolCallPayload(raw);
+  let parsed: JsonValue;
+  try {
+    parsed = parseJsonOutput(payload);
+  } catch (error) {
+    throw new ToolCallParseError("model did not return a parseable JSON tool call", raw, error);
+  }
+
+  try {
+    return normalizeToolCallResult(parsed, raw, expectedNames);
+  } catch (error) {
+    throw new ToolCallParseError(error instanceof Error ? error.message : "invalid tool call payload", raw, error);
+  }
 };
 
 const currentLocalDate = () => {
@@ -633,6 +671,12 @@ export class RewriteLLM {
       task,
       model
     });
+  }
+
+  static parseToolCall(raw: string, tools: RewriteLLMTool | RewriteLLMTool[]) {
+    const normalizedTools = normalizeTools(tools);
+    const expectedNames = new Set(normalizedTools.map((tool) => tool.function.name));
+    return parseToolCallResult(raw, expectedNames);
   }
 
   ready() {
@@ -762,6 +806,7 @@ export class RewriteLLM {
     runtime: RunRuntimeOptions = {}
   ) {
     const normalizedTools = normalizeTools(tools);
+    const expectedNames = new Set(normalizedTools.map((tool) => tool.function.name));
     const currentDate = options.currentDate || currentLocalDate();
     const {
       currentDate: _currentDate,
@@ -776,6 +821,8 @@ export class RewriteLLM {
           content: systemPrompt || [
             "You choose exactly one available tool for the user request.",
             "Use the provided JSON schemas and enum values exactly.",
+            "Field descriptions are binding constraints; apply any normalization examples exactly.",
+            "When the request explicitly contains an enum value, select that exact enum value.",
             "Resolve relative dates against the provided current date and output dates as YYYY-MM-DD.",
             "Return only the tool call in the format required by the model chat template."
           ].join("\n")
@@ -799,7 +846,7 @@ export class RewriteLLM {
       runtime
     );
     const raw = extractGeneratedText(result);
-    return normalizeToolCallResult(parseJsonOutput(extractToolCallPayload(raw)), raw);
+    return parseToolCallResult(raw, expectedNames);
   }
 
   async extractToolArguments(

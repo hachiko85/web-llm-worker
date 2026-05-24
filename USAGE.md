@@ -87,7 +87,7 @@ const searchTool = {
       type: "object",
       additionalProperties: false,
       properties: {
-        keyword: { type: "string" },
+        keyword: { type: "string", description: "Normalize お祭り to 祭り." },
         "ins-from": { type: "string", description: "Start date as YYYY-MM-DD." },
         "ins-to": { type: "string", description: "End date as YYYY-MM-DD." },
         tags: {
@@ -128,6 +128,22 @@ Expected parsed shape:
 ```
 
 For a single tool, `extractToolArguments()` returns only the parsed `arguments` object. This is still local model inference, so validate the parsed arguments in your application before executing an operation.
+
+If the model returns normal text, malformed JSON, or an unknown tool name, `extractToolCall()` throws `ToolCallParseError`. The error exposes `reason` and `raw` so the application can log or display the failed model response.
+
+```ts
+try {
+  const call = await llm.extractToolCall(question, searchTool);
+  runSearch(call.arguments);
+} catch (error) {
+  if (error instanceof ToolCallParseError) {
+    console.error(error.reason);
+    console.error(error.raw);
+  }
+}
+```
+
+Use `RewriteLLM.parseToolCall(raw, tools)` to parse or validate a raw model response without running inference.
 
 ## Pipeline options
 

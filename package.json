@@ -18,6 +18,7 @@
     "serve:test": "node scripts/test-server.mjs",
     "verify:model-serving": "node scripts/verify-model-serving.mjs",
     "verify:browser": "node scripts/verify-browser.mjs",
+    "verify:real-tool-call": "node scripts/verify-real-tool-call.mjs",
     "clean": "node scripts/clean.mjs"
   },
   "keywords": [
