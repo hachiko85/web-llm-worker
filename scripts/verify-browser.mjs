@@ -35,6 +35,7 @@ const context = await browser.newContext({
 
 const pageA = await context.newPage();
 const pageB = await context.newPage();
+const markerUrl = `${baseUrl}/models/onnx-community/Ternary-Bonsai-4B-ONNX/resolve/main/MIRROR_README.txt`;
 
 const readPanel = async (page) => ({
   title: await page.title(),
@@ -59,6 +60,7 @@ const readPanel = async (page) => ({
 try {
   await pageA.goto(`${baseUrl}/test-sites/site-a/`);
   await pageB.goto(`${baseUrl}/test-sites/site-b/`);
+  const markerResponse = await pageA.request.get(markerUrl);
   await pageA.waitForLoadState("domcontentloaded");
   await pageB.waitForLoadState("domcontentloaded");
 
@@ -94,6 +96,11 @@ try {
   const result = {
     executablePath,
     baseUrl,
+    modelMirrorMarker: {
+      url: markerUrl,
+      ok: markerResponse.ok(),
+      status: markerResponse.status()
+    },
     sameBroker: siteA.brokerId === siteB.brokerId,
     restartWorked: afterRestart.engineId === "idle" && afterRestart.jobsSinceRestart === "0",
     siteA,
@@ -115,6 +122,9 @@ try {
 
   if (!result.sameBroker) {
     throw new Error("Site A and Site B did not connect to the same SharedWorker broker.");
+  }
+  if (!result.modelMirrorMarker.ok) {
+    throw new Error("Same-origin model mirror marker was not served correctly.");
   }
   if (!siteA.reload.includes("reload")) {
     throw new Error("Reload status did not become recommended after the configured threshold.");
