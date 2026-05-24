@@ -76,6 +76,11 @@ try {
 
   await pageA.waitForFunction(() => document.querySelector("[data-output]")?.textContent?.includes("要約"));
   await pageB.waitForFunction(() => document.querySelector("[data-output]")?.textContent?.includes("翻訳"));
+  await pageA.getByRole("button", { name: "検索条件" }).click();
+  await pageA.waitForFunction(() => {
+    const text = document.querySelector("[data-output]")?.textContent || "";
+    return text.includes('"keyword": "祭り"') && text.includes('"ins-from": "2026-01-01"') && text.includes('"tags"');
+  });
   await pageA.waitForFunction(() => document.querySelector("[data-engine-id]")?.textContent !== "idle");
 
   await pageA.getByRole("button", { name: "メトリクス更新" }).click();

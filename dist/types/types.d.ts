@@ -8,6 +8,31 @@ export type ChatMessage = {
     content: string;
 };
 export type PipelineTask = "text-generation" | "summarization" | "translation" | "text2text-generation" | string;
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonValue[] | {
+    [key: string]: JsonValue;
+};
+export type ToolParameterSchema = {
+    type?: string | string[];
+    description?: string;
+    enum?: JsonValue[];
+    properties?: Record<string, ToolParameterSchema>;
+    items?: ToolParameterSchema;
+    required?: string[];
+    additionalProperties?: boolean | ToolParameterSchema;
+    [key: string]: unknown;
+};
+export type RewriteLLMTool = {
+    type?: "function" | string;
+    name?: string;
+    description?: string;
+    parameters?: ToolParameterSchema;
+    function?: {
+        name: string;
+        description?: string;
+        parameters?: ToolParameterSchema;
+    };
+};
 export type ProgressEvent = {
     status?: string;
     name?: string;
@@ -80,6 +105,15 @@ export type PipelineOptions = {
     session_options?: Record<string, unknown>;
 };
 export type GenerationOptions = Record<string, unknown>;
+export type ToolCallOptions = GenerationOptions & {
+    currentDate?: string;
+    systemPrompt?: string;
+};
+export type ToolCallResult = {
+    name: string;
+    arguments: Record<string, JsonValue>;
+    raw: string;
+};
 export type ModelSourceConfig = {
     remoteHost?: string;
     remotePathTemplate?: string;

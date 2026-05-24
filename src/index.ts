@@ -6,6 +6,7 @@ import {
   type BrokerToClientMessage,
   type ClientToBrokerMessage,
   type GenerationOptions,
+  type JsonValue,
   type MemoryMetricSnapshot,
   type MetricsOptions,
   type ModelSourceConfig,
@@ -16,8 +17,11 @@ import {
   type RewriteLLMConfig,
   type RewriteLLMGlobalConfig,
   type RewriteLLMMetrics,
+  type RewriteLLMTool,
   type RunRuntimeOptions,
   type SummarizeOptions,
+  type ToolCallOptions,
+  type ToolCallResult,
   type TranslateOptions,
   type WorkerPersistenceConfig,
   type WorkerReloadStatus
@@ -31,6 +35,7 @@ export {
   type BackendState,
   type ChatMessage,
   type GenerationOptions,
+  type JsonValue,
   type MemoryMetricSnapshot,
   type MetricsOptions,
   type ModelSourceConfig,
@@ -41,8 +46,12 @@ export {
   type RewriteLLMConfig,
   type RewriteLLMGlobalConfig,
   type RewriteLLMMetrics,
+  type RewriteLLMTool,
   type RunRuntimeOptions,
   type SummarizeOptions,
+  type ToolCallOptions,
+  type ToolCallResult,
+  type ToolParameterSchema,
   type TranslateOptions,
   type WorkerPersistenceConfig,
   type WorkerReloadStatus
@@ -369,8 +378,151 @@ const extractGeneratedText = (result: unknown) => {
     if (typeof first?.generated_text === "string") {
       return first.generated_text;
     }
+    if (Array.isArray(first?.generated_text)) {
+      const messages = [...first.generated_text].reverse();
+      const message = messages.find((item) => {
+        return typeof item === "object" && item !== null && typeof (item as { content?: unknown }).content === "string";
+      }) as { content: string } | undefined;
+      if (message) {
+        return message.content;
+      }
+    }
+    if (typeof first?.generated_text === "object" && first.generated_text !== null) {
+      const message = first.generated_text as { content?: unknown };
+      if (typeof message.content === "string") {
+        return message.content;
+      }
+    }
   }
   return typeof result === "string" ? result : JSON.stringify(result, null, 2);
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === "object" && value !== null && !Array.isArray(value)
+);
+
+const normalizeTools = (tools: RewriteLLMTool | RewriteLLMTool[]) => {
+  const list = Array.isArray(tools) ? tools : [tools];
+  return list.map((tool) => {
+    const source = tool.function ?? tool;
+    if (!source.name) {
+      throw new Error("RewriteLLM tool definitions require a function name.");
+    }
+
+    return {
+      type: "function",
+      function: {
+        name: source.name,
+        description: source.description || "",
+        parameters: source.parameters || {
+          type: "object",
+          properties: {},
+          additionalProperties: false
+        }
+      }
+    };
+  });
+};
+
+const findJsonCandidate = (text: string) => {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const source = fenced?.[1]?.trim() || text.trim();
+  const start = source.search(/[\[{]/);
+  if (start < 0) {
+    return source;
+  }
+
+  const open = source[start];
+  const close = open === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = inString;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) {
+      continue;
+    }
+    if (char === open) {
+      depth += 1;
+    } else if (char === close) {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(start, index + 1);
+      }
+    }
+  }
+
+  return source.slice(start);
+};
+
+const parseJsonOutput = (raw: string) => JSON.parse(findJsonCandidate(raw)) as JsonValue;
+
+const toArgumentsObject = (value: unknown): Record<string, JsonValue> => {
+  const parsed = typeof value === "string" ? JSON.parse(value) : value;
+  if (!isRecord(parsed)) {
+    throw new Error("RewriteLLM tool call arguments must be a JSON object.");
+  }
+  return parsed as Record<string, JsonValue>;
+};
+
+const normalizeToolCallResult = (parsed: JsonValue, raw: string): ToolCallResult => {
+  if (!isRecord(parsed)) {
+    throw new Error("RewriteLLM tool call output must be a JSON object.");
+  }
+
+  if (typeof parsed.name === "string" && "arguments" in parsed) {
+    return {
+      name: parsed.name,
+      arguments: toArgumentsObject(parsed.arguments),
+      raw
+    };
+  }
+
+  if (typeof parsed.tool === "string" && "arguments" in parsed) {
+    return {
+      name: parsed.tool,
+      arguments: toArgumentsObject(parsed.arguments),
+      raw
+    };
+  }
+
+  if (Array.isArray(parsed.tool_calls) && parsed.tool_calls.length > 0) {
+    const first = parsed.tool_calls[0];
+    if (isRecord(first)) {
+      const fn = isRecord(first.function) ? first.function : first;
+      if (typeof fn.name === "string" && "arguments" in fn) {
+        return {
+          name: fn.name,
+          arguments: toArgumentsObject(fn.arguments),
+          raw
+        };
+      }
+    }
+  }
+
+  throw new Error('RewriteLLM tool call output must contain {"name": "...", "arguments": {...}}.');
+};
+
+const currentLocalDate = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const date = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${date}`;
 };
 
 const collectPageMetrics = async (): Promise<MemoryMetricSnapshot> => {
@@ -596,6 +748,65 @@ export class RewriteLLM {
       runtime
     );
     return extractGeneratedText(result);
+  }
+
+  async extractToolCall(
+    input: string,
+    tools: RewriteLLMTool | RewriteLLMTool[],
+    options: ToolCallOptions = {},
+    runtime: RunRuntimeOptions = {}
+  ) {
+    const normalizedTools = normalizeTools(tools);
+    const currentDate = options.currentDate || currentLocalDate();
+    const {
+      currentDate: _currentDate,
+      systemPrompt,
+      ...generationOptions
+    } = options;
+
+    const result = await this.run(
+      [
+        {
+          role: "system",
+          content: systemPrompt || [
+            "You convert natural language into exactly one function-style tool call.",
+            "Return only valid JSON. Do not use markdown, comments, or explanatory text.",
+            'The JSON shape must be {"name":"tool_name","arguments":{}}.',
+            "Use the provided JSON schemas and enum values exactly.",
+            "Resolve relative dates against the provided current date and output dates as YYYY-MM-DD."
+          ].join("\n")
+        },
+        {
+          role: "user",
+          content: [
+            `Current date: ${currentDate}`,
+            "Tools:",
+            JSON.stringify(normalizedTools, null, 2),
+            "Natural language request:",
+            input
+          ].join("\n\n")
+        }
+      ],
+      {
+        max_new_tokens: 256,
+        do_sample: false,
+        return_full_text: false,
+        ...generationOptions
+      },
+      runtime
+    );
+    const raw = extractGeneratedText(result);
+    return normalizeToolCallResult(parseJsonOutput(raw), raw);
+  }
+
+  async extractToolArguments(
+    input: string,
+    tool: RewriteLLMTool,
+    options: ToolCallOptions = {},
+    runtime: RunRuntimeOptions = {}
+  ) {
+    const call = await this.extractToolCall(input, tool, options, runtime);
+    return call.arguments;
   }
 }
 

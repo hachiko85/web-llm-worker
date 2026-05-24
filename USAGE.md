@@ -73,6 +73,62 @@ const completion = await llm.complete("Write a short product tagline:", {
 });
 ```
 
+## Function-style argument extraction
+
+`extractToolCall()` uses the default text-generation pipeline to convert a natural-language request into a JSON tool call. This is not native function calling; the tool schema is placed in the prompt and the returned JSON is parsed on the client side.
+
+```ts
+const searchTool = {
+  type: "function",
+  function: {
+    name: "searchArticles",
+    description: "Build article search filters.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        keyword: { type: "string" },
+        "ins-from": { type: "string", description: "Start date as YYYY-MM-DD." },
+        "ins-to": { type: "string", description: "End date as YYYY-MM-DD." },
+        tags: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: ["報知", "記事", "お知らせ"]
+          }
+        }
+      },
+      required: ["keyword", "ins-from", "ins-to", "tags"]
+    }
+  }
+};
+
+const call = await llm.extractToolCall(
+  "今年の一月から2026-03-03に掲載されたお祭りに関する記事を調べて",
+  searchTool,
+  { currentDate: "2026-05-24" }
+);
+
+console.log(call.name);
+console.log(call.arguments);
+```
+
+Expected parsed shape:
+
+```json
+{
+  "name": "searchArticles",
+  "arguments": {
+    "keyword": "祭り",
+    "ins-from": "2026-01-01",
+    "ins-to": "2026-03-03",
+    "tags": ["記事"]
+  }
+}
+```
+
+For a single tool, `extractToolArguments()` returns only the parsed `arguments` object.
+
 ## Pipeline options
 
 The default model and task are:

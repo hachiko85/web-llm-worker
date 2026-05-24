@@ -183,6 +183,90 @@ const translated = await llm.translate("今日は良い天気です。", {
 });
 ```
 
+### `extractToolCall(input, tools, options?, runtime?)`
+
+function calling に近い形で、自然言語からツール名と引数 JSON を作ります。実際には Transformers.js の `text-generation` に tools/schema をプロンプトとして渡し、返ってきた JSON をパースします。
+
+```ts
+const searchTool = {
+  type: "function",
+  function: {
+    name: "searchArticles",
+    description: "記事検索フィルターを作成する",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        keyword: {
+          type: "string",
+          description: "検索キーワード"
+        },
+        "ins-from": {
+          type: "string",
+          description: "掲載日の開始日。YYYY-MM-DD"
+        },
+        "ins-to": {
+          type: "string",
+          description: "掲載日の終了日。YYYY-MM-DD"
+        },
+        tags: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: ["報知", "記事", "お知らせ"]
+          }
+        }
+      },
+      required: ["keyword", "ins-from", "ins-to", "tags"]
+    }
+  }
+};
+
+const call = await llm.extractToolCall(
+  "今年の一月から2026-03-03に掲載されたお祭りに関する記事を調べて",
+  searchTool,
+  {
+    currentDate: "2026-05-24"
+  }
+);
+
+console.log(call.name);
+console.log(call.arguments);
+```
+
+期待される返り値の形:
+
+```json
+{
+  "name": "searchArticles",
+  "arguments": {
+    "keyword": "祭り",
+    "ins-from": "2026-01-01",
+    "ins-to": "2026-03-03",
+    "tags": ["記事"]
+  },
+  "raw": "{\"name\":\"searchArticles\",\"arguments\":...}"
+}
+```
+
+単一ツールの引数だけ欲しい場合は `extractToolArguments()` を使えます。
+
+```ts
+const args = await llm.extractToolArguments(
+  "今年の一月から2026-03-03に掲載されたお祭りに関する記事を調べて",
+  searchTool,
+  {
+    currentDate: "2026-05-24"
+  }
+);
+```
+
+注意点:
+
+- 本物のネイティブ function calling ではなく、ローカル LLM に JSON 出力を促すヘルパーです。
+- モデル出力に前後の説明や `json` code fence が混ざった場合でも、最初の JSON オブジェクトを抽出してパースします。
+- enum や required はプロンプト上の制約です。厳密な業務バリデーションが必要な場合は、返却後にアプリ側でも検証してください。
+
 ### `state()`
 
 broker/worker の状態を返します。

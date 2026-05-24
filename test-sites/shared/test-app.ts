@@ -1,7 +1,7 @@
-import { RewriteLLM, type BackendState, type MemoryMetricSnapshot, type ProgressEvent, type RewriteLLMMetrics } from "../../src/index";
+import { RewriteLLM, type BackendState, type MemoryMetricSnapshot, type ProgressEvent, type RewriteLLMMetrics, type RewriteLLMTool } from "../../src/index";
 import "./test-app.css";
 
-type Action = "summarize" | "translate" | "infer";
+type Action = "summarize" | "translate" | "infer" | "filter";
 
 const siteName = document.body.dataset.site || "Test Site";
 const app = document.querySelector<HTMLDivElement>("#app");
@@ -29,12 +29,13 @@ app.innerHTML = `
       <div class="panel input-panel">
         <label>
           Input
-          <textarea data-input rows="9">日本語の文章を短く要約し、そのあと英語へ翻訳できるか確認します。SharedWorker の brokerId が Site A と Site B で同じなら、二つのページが同じバックエンドに接続できています。</textarea>
+          <textarea data-input rows="9">今年の一月から2026-03-03に掲載されたお祭りに関する記事を調べて</textarea>
         </label>
         <div class="controls">
           <button type="button" data-action="summarize">要約</button>
           <button type="button" data-action="translate">翻訳</button>
           <button type="button" data-action="infer">推論</button>
+          <button type="button" data-action="filter">検索条件</button>
           <button type="button" data-action="state">状態更新</button>
           <button type="button" data-action="metrics">メトリクス更新</button>
           <button type="button" data-action="restart">ワーカー再起動</button>
@@ -181,6 +182,41 @@ const llm = new RewriteLLM({
   timeoutMs: 10 * 60 * 1000
 });
 
+const articleSearchTool: RewriteLLMTool = {
+  type: "function",
+  function: {
+    name: "searchArticles",
+    description: "記事検索フィルターを作成する",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        keyword: {
+          type: "string",
+          description: "検索キーワード。自然な日本語から名詞句だけを短く抽出する。"
+        },
+        "ins-from": {
+          type: "string",
+          description: "掲載日の開始日。YYYY-MM-DD。"
+        },
+        "ins-to": {
+          type: "string",
+          description: "掲載日の終了日。YYYY-MM-DD。"
+        },
+        tags: {
+          type: "array",
+          description: "タグ候補から選ぶ。",
+          items: {
+            type: "string",
+            enum: ["報知", "記事", "お知らせ"]
+          }
+        }
+      },
+      required: ["keyword", "ins-from", "ins-to", "tags"]
+    }
+  }
+};
+
 const paintState = (state: BackendState) => {
   webgpu.textContent = `WebGPU: ${state.webgpu ? "available" : "unavailable"}`;
   broker.textContent = `Broker: ${state.running ? "running" : "idle"}`;
@@ -275,6 +311,8 @@ const runAction = async (action: Action) => {
       result = await llm.summarize(input.value, { language: "Japanese" }, runtime);
     } else if (action === "translate") {
       result = await llm.translate(input.value, { sourceLanguage: "Japanese", targetLanguage: "English" }, runtime);
+    } else if (action === "filter") {
+      result = await llm.extractToolCall(input.value, articleSearchTool, { currentDate: "2026-05-24" }, runtime);
     } else {
       result = await llm.complete(`推論してください:\n${input.value}`, { max_new_tokens: 96 }, runtime);
     }
@@ -311,7 +349,7 @@ app.addEventListener("click", (event) => {
     return;
   }
 
-  if (action === "summarize" || action === "translate" || action === "infer") {
+  if (action === "summarize" || action === "translate" || action === "infer" || action === "filter") {
     void runAction(action);
   }
 });
