@@ -2,10 +2,19 @@ import {
   DEFAULT_MODEL,
   DEFAULT_TASK,
   type EngineRunMessage,
-  type EngineToBrokerMessage
+  type EngineToBrokerMessage,
+  type PipelineOptions
 } from "./types";
 
 type ProgressPost = (message: EngineToBrokerMessage) => void;
+type Generator = {
+  tokenizer?: any;
+  dispose?: () => Promise<void> | void;
+  (input: never, options: Record<string, unknown>): Promise<unknown>;
+};
+
+let cachedGenerator: Generator | null = null;
+let cachedKey: string | null = null;
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -93,13 +102,26 @@ export const runEngineJob = async (message: EngineRunMessage, post: ProgressPost
         }
       });
     }
-  } as never;
+  };
+  const cacheKey = JSON.stringify({
+    task: message.task || DEFAULT_TASK,
+    model: message.model || DEFAULT_MODEL,
+    modelSource,
+    pipelineOptions: sanitizePipelineOptions(pipelineOptions)
+  });
+  const persistent = Boolean(message.persistence?.enabled);
 
-  const generator = (await pipeline(
-    (message.task || DEFAULT_TASK) as never,
-    message.model || DEFAULT_MODEL,
-    pipelineOptions
-  )) as any;
+  if (!persistent || cachedKey !== cacheKey || !cachedGenerator) {
+    await disposeEngineRuntime();
+    cachedGenerator = (await pipeline(
+      (message.task || DEFAULT_TASK) as never,
+      message.model || DEFAULT_MODEL,
+      pipelineOptions as never
+    )) as Generator;
+    cachedKey = cacheKey;
+  }
+
+  const generator = cachedGenerator;
 
   try {
     const generationOptions = { ...message.generationOptions };
@@ -132,6 +154,26 @@ export const runEngineJob = async (message: EngineRunMessage, post: ProgressPost
 
     return await generator(message.input as never, generationOptions);
   } finally {
-    await generator.dispose?.();
+    if (!persistent) {
+      await disposeEngineRuntime();
+    }
   }
+};
+
+const sanitizePipelineOptions = (options: PipelineOptions & Record<string, unknown>) => {
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(options)) {
+    if (typeof value !== "function") {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+};
+
+export const disposeEngineRuntime = async () => {
+  if (cachedGenerator) {
+    await cachedGenerator.dispose?.();
+  }
+  cachedGenerator = null;
+  cachedKey = null;
 };

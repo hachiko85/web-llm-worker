@@ -41,6 +41,10 @@ const readPanel = async (page) => ({
   brokerId: await page.locator("[data-broker-id]").innerText(),
   clients: await page.locator('[data-status="clients"]').innerText(),
   output: await page.locator("[data-output]").innerText(),
+  engineId: await page.locator("[data-engine-id]").innerText(),
+  reload: await page.locator("[data-reload]").innerText(),
+  jobsSinceRestart: await page.locator("[data-jobs-since-restart]").innerText(),
+  modelHost: await page.locator("[data-model-host]").innerText(),
   workerHeapUsed: await page.locator("[data-worker-heap-used]").innerText(),
   workerHeapLimit: await page.locator("[data-worker-heap-limit]").innerText(),
   pageHeapUsed: await page.locator("[data-page-heap-used]").innerText(),
@@ -70,6 +74,7 @@ try {
 
   await pageA.waitForFunction(() => document.querySelector("[data-output]")?.textContent?.includes("要約"));
   await pageB.waitForFunction(() => document.querySelector("[data-output]")?.textContent?.includes("翻訳"));
+  await pageA.waitForFunction(() => document.querySelector("[data-engine-id]")?.textContent !== "idle");
 
   await pageA.getByRole("button", { name: "メトリクス更新" }).click();
   await pageB.getByRole("button", { name: "メトリクス更新" }).click();
@@ -78,22 +83,44 @@ try {
 
   const siteA = await readPanel(pageA);
   const siteB = await readPanel(pageB);
+  await pageA.getByRole("button", { name: "ワーカー再起動" }).click();
+  await pageA.waitForFunction(() => document.querySelector("[data-engine-id]")?.textContent === "idle");
+  await pageA.waitForFunction(() => document.querySelector("[data-jobs-since-restart]")?.textContent === "0");
+  const afterRestart = {
+    engineId: await pageA.locator("[data-engine-id]").innerText(),
+    jobsSinceRestart: await pageA.locator("[data-jobs-since-restart]").innerText(),
+    reload: await pageA.locator("[data-reload]").innerText()
+  };
   const result = {
     executablePath,
     baseUrl,
     sameBroker: siteA.brokerId === siteB.brokerId,
+    restartWorked: afterRestart.engineId === "idle" && afterRestart.jobsSinceRestart === "0",
     siteA,
-    siteB
+    siteB,
+    afterRestart
   };
 
   await mkdir(screenshotDir, { recursive: true });
-  await pageA.screenshot({ path: join(screenshotDir, "site-a-metrics.png"), fullPage: true });
-  await pageB.screenshot({ path: join(screenshotDir, "site-b-metrics.png"), fullPage: true });
+  const screenshotWarnings = [];
+  await pageA.screenshot({ path: join(screenshotDir, "site-a-metrics.png"), fullPage: false, timeout: 10000 })
+    .catch((error) => screenshotWarnings.push(`Site A screenshot skipped: ${error.message}`));
+  await pageB.screenshot({ path: join(screenshotDir, "site-b-metrics.png"), fullPage: false, timeout: 10000 })
+    .catch((error) => screenshotWarnings.push(`Site B screenshot skipped: ${error.message}`));
 
   console.log(JSON.stringify(result, null, 2));
+  if (screenshotWarnings.length > 0) {
+    console.warn(screenshotWarnings.join("\n"));
+  }
 
   if (!result.sameBroker) {
     throw new Error("Site A and Site B did not connect to the same SharedWorker broker.");
+  }
+  if (!siteA.reload.includes("reload")) {
+    throw new Error("Reload status did not become recommended after the configured threshold.");
+  }
+  if (!result.restartWorked) {
+    throw new Error("Worker restart did not reset the persistent engine state.");
   }
 } finally {
   if (!headless) {

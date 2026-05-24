@@ -1,5 +1,5 @@
-import { type BackendState, type GenerationOptions, type MetricsOptions, type ModelSourceConfig, type PipelineInput, type PipelineOptions, type PipelineTask, type RewriteLLMConfig, type RewriteLLMMetrics, type RunRuntimeOptions, type SummarizeOptions, type TranslateOptions } from "./types";
-export { DEFAULT_ALIAS, DEFAULT_MODEL, DEFAULT_TASK, type BackendState, type ChatMessage, type GenerationOptions, type MemoryMetricSnapshot, type MetricsOptions, type ModelSourceConfig, type PipelineInput, type PipelineOptions, type PipelineTask, type ProgressEvent, type RewriteLLMConfig, type RewriteLLMGlobalConfig, type RewriteLLMMetrics, type RunRuntimeOptions, type SummarizeOptions, type TranslateOptions } from "./types";
+import { type BackendState, type GenerationOptions, type MetricsOptions, type ModelSourceConfig, type PipelineInput, type PipelineOptions, type PipelineTask, type RewriteLLMConfig, type RewriteLLMMetrics, type RunRuntimeOptions, type SummarizeOptions, type TranslateOptions, type WorkerPersistenceConfig, type WorkerReloadStatus } from "./types";
+export { DEFAULT_ALIAS, DEFAULT_MODEL, DEFAULT_TASK, type BackendState, type ChatMessage, type GenerationOptions, type MemoryMetricSnapshot, type MetricsOptions, type ModelSourceConfig, type PipelineInput, type PipelineOptions, type PipelineTask, type ProgressEvent, type RewriteLLMConfig, type RewriteLLMGlobalConfig, type RewriteLLMMetrics, type RunRuntimeOptions, type SummarizeOptions, type TranslateOptions, type WorkerPersistenceConfig, type WorkerReloadStatus } from "./types";
 export interface RewriteLLM {
     (input: PipelineInput, options?: GenerationOptions, runtime?: RunRuntimeOptions): Promise<unknown>;
 }
@@ -8,6 +8,7 @@ export declare class RewriteLLM {
     readonly task: PipelineTask;
     readonly model: string;
     readonly modelSource?: ModelSourceConfig;
+    readonly persistence: WorkerPersistenceConfig;
     readonly workerUrl?: string;
     readonly pipelineOptions: PipelineOptions;
     readonly mock: boolean;
@@ -18,6 +19,8 @@ export declare class RewriteLLM {
     ready(): Promise<BackendState>;
     state(): Promise<BackendState>;
     metrics(options?: MetricsOptions): Promise<RewriteLLMMetrics>;
+    reloadStatus(): Promise<WorkerReloadStatus>;
+    restart(): Promise<BackendState>;
     restartEngine(): Promise<BackendState>;
     run(input: PipelineInput, options?: GenerationOptions, runtime?: RunRuntimeOptions): Promise<unknown>;
     complete(prompt: string, options?: GenerationOptions, runtime?: RunRuntimeOptions): Promise<unknown>;

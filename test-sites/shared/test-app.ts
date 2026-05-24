@@ -21,6 +21,7 @@ app.innerHTML = `
         <span data-status="webgpu">WebGPU: checking</span>
         <span data-status="broker">Broker: connecting</span>
         <span data-status="clients">Clients: 0</span>
+        <span data-status="persistence">Persistence: checking</span>
       </div>
     </section>
 
@@ -36,6 +37,7 @@ app.innerHTML = `
           <button type="button" data-action="infer">推論</button>
           <button type="button" data-action="state">状態更新</button>
           <button type="button" data-action="metrics">メトリクス更新</button>
+          <button type="button" data-action="restart">ワーカー再起動</button>
         </div>
         <label class="toggle">
           <input data-mock type="checkbox" checked />
@@ -68,6 +70,22 @@ app.innerHTML = `
       <div>
         <span>queue</span>
         <strong data-queue>0</strong>
+      </div>
+      <div>
+        <span>reload</span>
+        <strong data-reload>ok</strong>
+      </div>
+      <div>
+        <span>jobs since restart</span>
+        <strong data-jobs-since-restart>0</strong>
+      </div>
+      <div>
+        <span>model host</span>
+        <strong data-model-host>default</strong>
+      </div>
+      <div>
+        <span>model template</span>
+        <strong data-model-template>default</strong>
       </div>
     </section>
 
@@ -126,10 +144,15 @@ const running = app.querySelector<HTMLElement>("[data-running]")!;
 const webgpu = app.querySelector<HTMLElement>('[data-status="webgpu"]')!;
 const broker = app.querySelector<HTMLElement>('[data-status="broker"]')!;
 const clients = app.querySelector<HTMLElement>('[data-status="clients"]')!;
+const persistenceStatus = app.querySelector<HTMLElement>('[data-status="persistence"]')!;
 const brokerId = app.querySelector<HTMLElement>("[data-broker-id]")!;
 const engineId = app.querySelector<HTMLElement>("[data-engine-id]")!;
 const completed = app.querySelector<HTMLElement>("[data-completed]")!;
 const queue = app.querySelector<HTMLElement>("[data-queue]")!;
+const reload = app.querySelector<HTMLElement>("[data-reload]")!;
+const jobsSinceRestart = app.querySelector<HTMLElement>("[data-jobs-since-restart]")!;
+const modelHost = app.querySelector<HTMLElement>("[data-model-host]")!;
+const modelTemplate = app.querySelector<HTMLElement>("[data-model-template]")!;
 const metricsTime = app.querySelector<HTMLElement>("[data-metrics-time]")!;
 const workerHeapUsed = app.querySelector<HTMLElement>("[data-worker-heap-used]")!;
 const workerHeapLimit = app.querySelector<HTMLElement>("[data-worker-heap-limit]")!;
@@ -144,6 +167,17 @@ const metricsNotes = app.querySelector<HTMLElement>("[data-metrics-notes]")!;
 
 const llm = new RewriteLLM({
   mock: true,
+  modelSource: {
+    remoteHost: new URL("/models/", window.location.origin).href,
+    remotePathTemplate: "{model}/resolve/{revision}/",
+    cacheKey: "rewrite-llm-local-models"
+  },
+  persistence: {
+    enabled: true,
+    maxCompletedJobsBeforeReload: 2,
+    usedHeapRatioThreshold: 0.82,
+    storageUsageRatioThreshold: 0.9
+  },
   timeoutMs: 10 * 60 * 1000
 });
 
@@ -151,10 +185,15 @@ const paintState = (state: BackendState) => {
   webgpu.textContent = `WebGPU: ${state.webgpu ? "available" : "unavailable"}`;
   broker.textContent = `Broker: ${state.running ? "running" : "idle"}`;
   clients.textContent = `Clients: ${state.clients}`;
+  persistenceStatus.textContent = `Persistence: ${state.persistence.enabled ? "on" : "off"}`;
   brokerId.textContent = state.brokerId;
   engineId.textContent = state.engineId || "idle";
   completed.textContent = String(state.completedJobs);
+  jobsSinceRestart.textContent = String(state.completedJobsSinceRestart);
   queue.textContent = String(state.queued);
+  reload.textContent = state.reloadRecommended ? "recommended" : "ok";
+  modelHost.textContent = state.modelSource?.remoteHost || "default";
+  modelTemplate.textContent = state.modelSource?.remotePathTemplate || "default";
   running.textContent = state.running ? "running" : "idle";
 };
 
@@ -185,6 +224,7 @@ const metricNotes = (label: string, snapshot?: MemoryMetricSnapshot) => {
 const paintMetrics = (metrics: RewriteLLMMetrics) => {
   const worker = metrics.worker;
   const page = metrics.page;
+  paintState(metrics.state);
   metricsTime.textContent = new Date(worker.capturedAt).toLocaleTimeString();
   workerHeapUsed.textContent = formatBytes(worker.usedJSHeapSize);
   workerHeapLimit.textContent = formatBytes(worker.jsHeapSizeLimit);
@@ -195,7 +235,9 @@ const paintMetrics = (metrics: RewriteLLMMetrics) => {
   storageUsage.textContent = formatBytes(worker.storageUsage ?? page?.storageUsage);
   storageQuota.textContent = formatBytes(worker.storageQuota ?? page?.storageQuota);
   isolation.textContent = `worker: ${worker.crossOriginIsolated ? "isolated" : "not isolated"} / page: ${page?.crossOriginIsolated ? "isolated" : "not isolated"}`;
+  reload.textContent = metrics.reloadStatus.recommended ? `${metrics.reloadStatus.level}: ${metrics.reloadStatus.reasons.join(", ")}` : metrics.reloadStatus.level;
   metricsNotes.textContent = [
+    `reload: ${metrics.reloadStatus.recommended ? metrics.reloadStatus.reasons.join("; ") : "not recommended"}`,
     ...metricNotes("worker", worker),
     ...metricNotes("page", page)
   ].join("\n");
@@ -258,6 +300,14 @@ app.addEventListener("click", (event) => {
 
   if (action === "metrics") {
     void refreshMetrics();
+    return;
+  }
+
+  if (action === "restart") {
+    void llm.restart().then((state) => {
+      paintState(state);
+      void refreshMetrics();
+    });
     return;
   }
 

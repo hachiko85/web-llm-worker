@@ -18,7 +18,9 @@ import {
   type RewriteLLMMetrics,
   type RunRuntimeOptions,
   type SummarizeOptions,
-  type TranslateOptions
+  type TranslateOptions,
+  type WorkerPersistenceConfig,
+  type WorkerReloadStatus
 } from "./types";
 import sharedWorkerUrl from "./rewrite-llm.shared-worker.ts?sharedworker&url";
 
@@ -41,7 +43,9 @@ export {
   type RewriteLLMMetrics,
   type RunRuntimeOptions,
   type SummarizeOptions,
-  type TranslateOptions
+  type TranslateOptions,
+  type WorkerPersistenceConfig,
+  type WorkerReloadStatus
 } from "./types";
 
 type PendingRequest = {
@@ -51,6 +55,7 @@ type PendingRequest = {
   onStatus?: (state: BackendState) => void;
   expectsStateResult?: boolean;
   expectsMetricsResult?: boolean;
+  expectsReloadStatusResult?: boolean;
   timeoutId?: number;
 };
 
@@ -83,6 +88,7 @@ const toError = (message: BrokerToClientMessage & { type: "error" }) => {
 class BackendConnection {
   readonly alias: string;
   readonly modelSource?: ModelSourceConfig;
+  readonly persistence: WorkerPersistenceConfig;
   readonly workerUrl: string;
   readonly clientId = createId();
   private transport: BackendTransport;
@@ -91,9 +97,10 @@ class BackendConnection {
   private helloPromise: Promise<BackendState>;
   private helloResolve!: (state: BackendState) => void;
 
-  constructor(alias: string, workerUrl: string, modelSource?: ModelSourceConfig) {
+  constructor(alias: string, workerUrl: string, modelSource: ModelSourceConfig | undefined, persistence: WorkerPersistenceConfig) {
     this.alias = alias;
     this.modelSource = modelSource;
+    this.persistence = persistence;
     this.workerUrl = workerUrl;
     this.helloPromise = new Promise((resolve) => {
       this.helloResolve = resolve;
@@ -103,7 +110,8 @@ class BackendConnection {
       type: "client-hello",
       id: createId(),
       alias,
-      modelSource
+      modelSource,
+      persistence
     });
   }
 
@@ -136,6 +144,10 @@ class BackendConnection {
     return this.request({ type: "get-metrics" }, {});
   }
 
+  getReloadStatus() {
+    return this.request({ type: "get-reload-status" }, {});
+  }
+
   restartEngine() {
     return this.request({ type: "restart-engine" }, {});
   }
@@ -154,7 +166,8 @@ class BackendConnection {
         onProgress: callbacks.onProgress,
         onStatus: callbacks.onStatus,
         expectsStateResult: partial.type === "get-state" || partial.type === "restart-engine",
-        expectsMetricsResult: partial.type === "get-metrics"
+        expectsMetricsResult: partial.type === "get-metrics",
+        expectsReloadStatusResult: partial.type === "get-reload-status"
       };
 
       if (callbacks.timeoutMs && callbacks.timeoutMs > 0) {
@@ -233,6 +246,11 @@ class BackendConnection {
       return;
     }
 
+    if (message.type === "reload-status") {
+      this.resolve(message.id, message.status);
+      return;
+    }
+
     if (message.type === "error") {
       this.reject(message.id, toError(message));
     }
@@ -295,7 +313,12 @@ const resolveWorkerUrl = (workerUrl?: string) => {
 
 const registryId = (alias: string, workerUrl?: string) => `${alias}::${resolveWorkerUrl(workerUrl)}`;
 
-const ensureBackend = (alias = DEFAULT_ALIAS, workerUrl?: string, modelSource?: ModelSourceConfig) => {
+const ensureBackend = (
+  alias = DEFAULT_ALIAS,
+  workerUrl?: string,
+  modelSource?: ModelSourceConfig,
+  persistence = normalizePersistence()
+) => {
   if (!isBrowser()) {
     throw new Error("RewriteLLM can only start its browser backend in a browser context.");
   }
@@ -307,7 +330,7 @@ const ensureBackend = (alias = DEFAULT_ALIAS, workerUrl?: string, modelSource?: 
     return existing;
   }
 
-  const connection = new BackendConnection(alias, workerUrl || sharedWorkerUrl, modelSource);
+  const connection = new BackendConnection(alias, workerUrl || sharedWorkerUrl, modelSource, persistence);
   registry.set(id, connection);
   return connection;
 };
@@ -316,6 +339,29 @@ const defaultPipelineOptions = (): PipelineOptions => ({
   device: "webgpu",
   dtype: "q2f16"
 });
+
+const normalizePersistence = (value?: boolean | Partial<WorkerPersistenceConfig>): WorkerPersistenceConfig => {
+  const defaults: WorkerPersistenceConfig = {
+    enabled: false,
+    idleTimeoutMs: 0,
+    maxCompletedJobsBeforeReload: 20,
+    usedHeapRatioThreshold: 0.82,
+    storageUsageRatioThreshold: 0.9
+  };
+
+  if (typeof value === "boolean") {
+    return {
+      ...defaults,
+      enabled: value
+    };
+  }
+
+  return {
+    ...defaults,
+    ...value,
+    enabled: value?.enabled ?? defaults.enabled
+  };
+};
 
 const extractGeneratedText = (result: unknown) => {
   if (Array.isArray(result)) {
@@ -394,6 +440,7 @@ export class RewriteLLM {
   readonly task: PipelineTask;
   readonly model: string;
   readonly modelSource?: ModelSourceConfig;
+  readonly persistence: WorkerPersistenceConfig;
   readonly workerUrl?: string;
   readonly pipelineOptions: PipelineOptions;
   readonly mock: boolean;
@@ -407,6 +454,7 @@ export class RewriteLLM {
     this.task = config.task || DEFAULT_TASK;
     this.model = config.model || DEFAULT_MODEL;
     this.modelSource = config.modelSource || globalConfig.modelSource;
+    this.persistence = normalizePersistence(config.persistence ?? globalConfig.persistence);
     this.workerUrl = config.workerUrl || globalConfig.workerUrl;
     this.pipelineOptions = {
       ...defaultPipelineOptions(),
@@ -414,7 +462,7 @@ export class RewriteLLM {
     };
     this.mock = config.mock ?? false;
     this.timeoutMs = config.timeoutMs;
-    this.backend = ensureBackend(this.alias, this.workerUrl, this.modelSource);
+    this.backend = ensureBackend(this.alias, this.workerUrl, this.modelSource, this.persistence);
 
     const callable = this.run.bind(this) as unknown as RewriteLLM;
     Object.setPrototypeOf(callable, new.target.prototype);
@@ -451,6 +499,14 @@ export class RewriteLLM {
     };
   }
 
+  reloadStatus() {
+    return this.backend.getReloadStatus() as Promise<WorkerReloadStatus>;
+  }
+
+  restart() {
+    return this.restartEngine();
+  }
+
   restartEngine() {
     return this.backend.restartEngine() as Promise<BackendState>;
   }
@@ -461,6 +517,7 @@ export class RewriteLLM {
         task: runtime.task || this.task,
         model: runtime.model || this.model,
         modelSource: runtime.modelSource || this.modelSource,
+        persistence: normalizePersistence(runtime.persistence ?? this.persistence),
         input,
         generationOptions: options,
         pipelineOptions: {
@@ -546,7 +603,12 @@ if (isBrowser()) {
   const globalConfig = getGlobalConfig();
   if (globalConfig.autoStart !== false) {
     try {
-      ensureBackend(globalConfig.alias || DEFAULT_ALIAS, globalConfig.workerUrl, globalConfig.modelSource);
+      ensureBackend(
+        globalConfig.alias || DEFAULT_ALIAS,
+        globalConfig.workerUrl,
+        globalConfig.modelSource,
+        normalizePersistence(globalConfig.persistence)
+      );
     } catch (error) {
       console.warn(error);
     }

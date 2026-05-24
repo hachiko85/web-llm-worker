@@ -20,6 +20,7 @@ The production bundle is emitted to `dist/`. The main browser entry is `dist/rew
 The singleton guarantee is scoped by normal browser security rules: pages must load the same built script from the same origin and use the same alias. Different origins cannot share the same `SharedWorker`.
 
 For CDN-style deployment and custom model hosting, see `DEPLOYMENT_JA.md`.
+For a Japanese constructor and method reference, see `HOW_TO_USE_JA.md`.
 
 ## Basic use
 
@@ -93,6 +94,50 @@ const llm = new RewriteLLM({
   },
   timeoutMs: 10 * 60 * 1000
 });
+```
+
+## Local model mirror
+
+To load model files from the same server as the app:
+
+```ts
+const llm = new RewriteLLM({
+  modelSource: {
+    remoteHost: new URL("/models/", location.origin).href,
+    remotePathTemplate: "{model}/resolve/{revision}/"
+  }
+});
+```
+
+Place files under:
+
+```text
+dist/models/onnx-community/Ternary-Bonsai-4B-ONNX/resolve/main/
+```
+
+See `HOW_TO_USE_JA.md` for the full Japanese setup notes.
+
+## Persistence mode
+
+By default, the engine disposes its pipeline after each inference. To keep the loaded pipeline warm:
+
+```ts
+const llm = new RewriteLLM({
+  persistence: {
+    enabled: true,
+    maxCompletedJobsBeforeReload: 20,
+    usedHeapRatioThreshold: 0.82
+  }
+});
+```
+
+Check whether the worker should be restarted:
+
+```ts
+const status = await llm.reloadStatus();
+if (status.recommended) {
+  await llm.restart();
+}
 ```
 
 ## Testing A/B singleton behavior

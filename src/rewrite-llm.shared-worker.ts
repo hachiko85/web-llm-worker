@@ -8,10 +8,12 @@ import {
   type ModelSourceConfig,
   type RewriteLLMMetrics,
   type SerializedError,
+  type WorkerPersistenceConfig,
+  type WorkerReloadStatus,
   serializeError
 } from "./types";
 import EngineWorker from "./rewrite-llm.engine-worker.ts?worker";
-import { runEngineJob } from "./engine-runner";
+import { disposeEngineRuntime, runEngineJob } from "./engine-runner";
 
 type PortLike = {
   postMessage: (message: BrokerToClientMessage) => void;
@@ -42,24 +44,51 @@ const queue: Job[] = [];
 let alias = DEFAULT_ALIAS;
 let engine: Worker | null = null;
 let engineId: string | null = null;
+let activeJob: Job | null = null;
 let running = false;
 let completedJobs = 0;
+let completedJobsSinceRestart = 0;
 let lastStartedAt: number | null = null;
 let lastFinishedAt: number | null = null;
+let lastRestartedAt: number | null = null;
 let fallbackDedicatedWorker = false;
 let modelSource: ModelSourceConfig | undefined;
+let persistence: WorkerPersistenceConfig = {
+  enabled: false,
+  idleTimeoutMs: 0,
+  maxCompletedJobsBeforeReload: 20,
+  usedHeapRatioThreshold: 0.82,
+  usedHeapBytesThreshold: undefined,
+  userAgentMemoryBytesThreshold: undefined,
+  storageUsageRatioThreshold: 0.9
+};
+let idleTimer: ReturnType<typeof setTimeout> | undefined;
+let lastReloadStatus: WorkerReloadStatus = {
+  checkedAt: Date.now(),
+  recommended: false,
+  level: "ok",
+  reasons: [],
+  persistence,
+  completedJobsSinceRestart,
+  engineId
+};
 
 const state = (): BackendState => ({
   alias,
   brokerId,
   engineId,
   modelSource: modelSource ?? null,
+  persistence,
+  reloadRecommended: lastReloadStatus.recommended,
+  reloadReasons: lastReloadStatus.reasons,
   clients: ports.size,
   running,
   queued: queue.length,
   completedJobs,
+  completedJobsSinceRestart,
   lastStartedAt,
   lastFinishedAt,
+  lastRestartedAt,
   webgpu: Boolean(navigator.gpu),
   fallbackDedicatedWorker
 });
@@ -122,10 +151,53 @@ const collectWorkerMetrics = async (): Promise<MemoryMetricSnapshot> => {
   };
 };
 
-const collectMetrics = async (): Promise<RewriteLLMMetrics> => ({
-  state: state(),
-  worker: await collectWorkerMetrics()
-});
+const collectReloadStatus = (worker?: MemoryMetricSnapshot): WorkerReloadStatus => {
+  const reasons: string[] = [];
+
+  if (persistence.enabled && persistence.maxCompletedJobsBeforeReload && completedJobsSinceRestart >= persistence.maxCompletedJobsBeforeReload) {
+    reasons.push(`completedJobsSinceRestart reached ${completedJobsSinceRestart}/${persistence.maxCompletedJobsBeforeReload}`);
+  }
+
+  const used = worker?.usedJSHeapSize;
+  const limit = worker?.jsHeapSizeLimit;
+  if (used !== undefined && limit && persistence.usedHeapRatioThreshold && used / limit >= persistence.usedHeapRatioThreshold) {
+    reasons.push(`worker JS heap ratio reached ${(used / limit * 100).toFixed(1)}%`);
+  }
+
+  if (used !== undefined && persistence.usedHeapBytesThreshold && used >= persistence.usedHeapBytesThreshold) {
+    reasons.push(`worker JS heap used reached ${used} bytes`);
+  }
+
+  if (worker?.userAgentSpecificMemory !== undefined && persistence.userAgentMemoryBytesThreshold && worker.userAgentSpecificMemory >= persistence.userAgentMemoryBytesThreshold) {
+    reasons.push(`worker user-agent memory reached ${worker.userAgentSpecificMemory} bytes`);
+  }
+
+  if (worker?.storageUsage !== undefined && worker.storageQuota && persistence.storageUsageRatioThreshold && worker.storageUsage / worker.storageQuota >= persistence.storageUsageRatioThreshold) {
+    reasons.push(`storage usage ratio reached ${(worker.storageUsage / worker.storageQuota * 100).toFixed(1)}%`);
+  }
+
+  const recommended = reasons.length > 0;
+  return {
+    checkedAt: Date.now(),
+    recommended,
+    level: recommended ? "reload" : persistence.enabled ? "watch" : "ok",
+    reasons,
+    persistence,
+    completedJobsSinceRestart,
+    engineId
+  };
+};
+
+const collectMetrics = async (): Promise<RewriteLLMMetrics> => {
+  const worker = await collectWorkerMetrics();
+  lastReloadStatus = collectReloadStatus(worker);
+
+  return {
+    state: state(),
+    worker,
+    reloadStatus: lastReloadStatus
+  };
+};
 
 const send = (port: PortLike, message: BrokerToClientMessage) => {
   port.postMessage(message);
@@ -140,14 +212,22 @@ const broadcastState = (id?: string) => {
 
 const finishJob = (job: Job, response: JobResponse) => {
   completedJobs += 1;
+  completedJobsSinceRestart += 1;
   lastFinishedAt = Date.now();
   running = false;
+  activeJob = null;
+  lastReloadStatus = collectReloadStatus();
 
-  if (engine) {
+  if (!persistence.enabled && engine) {
     engine.terminate();
     engine = null;
   }
-  engineId = null;
+  if (!persistence.enabled) {
+    engineId = null;
+    void disposeEngineRuntime();
+  } else {
+    scheduleIdleRestart();
+  }
 
   send(job.port, { ...response, state: state() } as BrokerToClientMessage);
   broadcastState(job.message.id);
@@ -169,7 +249,11 @@ const pumpQueue = async () => {
 
   running = true;
   lastStartedAt = Date.now();
-  engineId = crypto.randomUUID();
+  if (!engineId) {
+    engineId = crypto.randomUUID();
+  }
+  activeJob = job;
+  clearIdleRestart();
   broadcastState(job.message.id);
 
   try {
@@ -194,20 +278,26 @@ const pumpQueue = async () => {
       return;
     }
 
-    engine = new EngineWorker({
-      name: `rewrite-llm-engine-${engineId}`
-    });
+    if (!engine) {
+      engine = new EngineWorker({
+        name: `rewrite-llm-engine-${engineId}`
+      });
+    }
 
     engine.onmessage = (event: MessageEvent<EngineToBrokerMessage>) => {
       const message = event.data;
+      const currentJob = activeJob;
+      if (!currentJob) {
+        return;
+      }
 
       if (message.type === "progress") {
-        send(job.port, message);
+        send(currentJob.port, message);
         return;
       }
 
       if (message.type === "result") {
-        finishJob(job, {
+        finishJob(currentJob, {
           type: "result",
           id: message.id,
           result: message.result
@@ -215,7 +305,7 @@ const pumpQueue = async () => {
         return;
       }
 
-      finishJob(job, {
+      finishJob(currentJob, {
         type: "error",
         id: message.id,
         error: message.error
@@ -223,9 +313,12 @@ const pumpQueue = async () => {
     };
 
     engine.onerror = (event) => {
-      finishJob(job, {
+      if (!activeJob) {
+        return;
+      }
+      finishJob(activeJob, {
         type: "error",
-        id: job.message.id,
+        id: activeJob.message.id,
         error: engineError(event.message)
       });
     };
@@ -244,16 +337,56 @@ const pumpQueue = async () => {
 };
 
 const restartEngine = (id: string, port: PortLike) => {
+  clearIdleRestart();
   queue.length = 0;
   if (engine) {
     engine.terminate();
     engine = null;
   }
+  activeJob = null;
   running = false;
   engineId = null;
+  completedJobsSinceRestart = 0;
   lastFinishedAt = Date.now();
+  lastRestartedAt = Date.now();
+  void disposeEngineRuntime();
+  lastReloadStatus = collectReloadStatus();
   send(port, { type: "state", id, state: state() });
   broadcastState(id);
+};
+
+const clearIdleRestart = () => {
+  if (idleTimer !== undefined) {
+    clearTimeout(idleTimer);
+    idleTimer = undefined;
+  }
+};
+
+const scheduleIdleRestart = () => {
+  clearIdleRestart();
+  if (!persistence.enabled || !persistence.idleTimeoutMs || persistence.idleTimeoutMs <= 0) {
+    return;
+  }
+
+  idleTimer = setTimeout(() => {
+    if (!running && queue.length === 0) {
+      const port = ports.values().next().value;
+      if (port) {
+        restartEngine(crypto.randomUUID(), port);
+      }
+    }
+  }, persistence.idleTimeoutMs);
+};
+
+const applyPersistence = (next?: WorkerPersistenceConfig) => {
+  if (!next) {
+    return;
+  }
+  persistence = {
+    ...persistence,
+    ...next
+  };
+  lastReloadStatus = collectReloadStatus();
 };
 
 const handleMessage = (port: PortLike, event: MessageEvent<ClientToBrokerMessage>) => {
@@ -262,6 +395,7 @@ const handleMessage = (port: PortLike, event: MessageEvent<ClientToBrokerMessage
   if (message.type === "client-hello") {
     alias = message.alias || DEFAULT_ALIAS;
     modelSource = message.modelSource || modelSource;
+    applyPersistence(message.persistence);
     send(port, { type: "hello", id: message.id, state: state() });
     broadcastState(message.id);
     return;
@@ -279,12 +413,20 @@ const handleMessage = (port: PortLike, event: MessageEvent<ClientToBrokerMessage
     return;
   }
 
+  if (message.type === "get-reload-status") {
+    void collectMetrics().then((metrics) => {
+      send(port, { type: "reload-status", id: message.id, status: metrics.reloadStatus });
+    });
+    return;
+  }
+
   if (message.type === "restart-engine") {
     restartEngine(message.id, port);
     return;
   }
 
   modelSource = message.modelSource || modelSource;
+  applyPersistence(message.persistence);
   queue.push({ port, message });
   broadcastState(message.id);
   void pumpQueue();

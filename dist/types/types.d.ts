@@ -24,12 +24,17 @@ export type BackendState = {
     brokerId: string;
     engineId: string | null;
     modelSource: ModelSourceConfig | null;
+    persistence: WorkerPersistenceConfig;
+    reloadRecommended: boolean;
+    reloadReasons: string[];
     clients: number;
     running: boolean;
     queued: number;
     completedJobs: number;
+    completedJobsSinceRestart: number;
     lastStartedAt: number | null;
     lastFinishedAt: number | null;
+    lastRestartedAt: number | null;
     webgpu: boolean;
     fallbackDedicatedWorker: boolean;
 };
@@ -57,6 +62,7 @@ export type RewriteLLMMetrics = {
     state: BackendState;
     worker: MemoryMetricSnapshot;
     page?: MemoryMetricSnapshot;
+    reloadStatus: WorkerReloadStatus;
 };
 export type MetricsOptions = {
     includePage?: boolean;
@@ -84,11 +90,30 @@ export type ModelSourceConfig = {
     useWasmCache?: boolean;
     cacheKey?: string;
 };
+export type WorkerPersistenceConfig = {
+    enabled: boolean;
+    idleTimeoutMs?: number;
+    maxCompletedJobsBeforeReload?: number;
+    usedHeapRatioThreshold?: number;
+    usedHeapBytesThreshold?: number;
+    userAgentMemoryBytesThreshold?: number;
+    storageUsageRatioThreshold?: number;
+};
+export type WorkerReloadStatus = {
+    checkedAt: number;
+    recommended: boolean;
+    level: "ok" | "watch" | "reload";
+    reasons: string[];
+    persistence: WorkerPersistenceConfig;
+    completedJobsSinceRestart: number;
+    engineId: string | null;
+};
 export type RewriteLLMConfig = {
     alias?: string;
     task?: PipelineTask;
     model?: string;
     modelSource?: ModelSourceConfig;
+    persistence?: boolean | Partial<WorkerPersistenceConfig>;
     workerUrl?: string;
     pipelineOptions?: PipelineOptions;
     mock?: boolean;
@@ -98,12 +123,14 @@ export type RewriteLLMGlobalConfig = {
     alias?: string;
     autoStart?: boolean;
     modelSource?: ModelSourceConfig;
+    persistence?: boolean | Partial<WorkerPersistenceConfig>;
     workerUrl?: string;
 };
 export type RunRuntimeOptions = {
     task?: PipelineTask;
     model?: string;
     modelSource?: ModelSourceConfig;
+    persistence?: boolean | Partial<WorkerPersistenceConfig>;
     pipelineOptions?: PipelineOptions;
     mock?: boolean;
     timeoutMs?: number;
@@ -122,11 +149,15 @@ export type ClientToBrokerMessage = {
     id: string;
     alias: string;
     modelSource?: ModelSourceConfig;
+    persistence?: WorkerPersistenceConfig;
 } | {
     type: "get-state";
     id: string;
 } | {
     type: "get-metrics";
+    id: string;
+} | {
+    type: "get-reload-status";
     id: string;
 } | {
     type: "restart-engine";
@@ -137,6 +168,7 @@ export type ClientToBrokerMessage = {
     task: PipelineTask;
     model: string;
     modelSource?: ModelSourceConfig;
+    persistence?: WorkerPersistenceConfig;
     input: PipelineInput;
     generationOptions?: GenerationOptions;
     pipelineOptions?: PipelineOptions;
@@ -154,6 +186,10 @@ export type BrokerToClientMessage = {
     type: "metrics";
     id: string;
     metrics: RewriteLLMMetrics;
+} | {
+    type: "reload-status";
+    id: string;
+    status: WorkerReloadStatus;
 } | {
     type: "progress";
     id: string;
