@@ -75,7 +75,7 @@ const completion = await llm.complete("Write a short product tagline:", {
 
 ## Function-style argument extraction
 
-`extractToolCall()` uses the default text-generation pipeline to convert a natural-language request into a JSON tool call. This is not native function calling; the tool schema is placed in the prompt and the returned JSON is parsed on the client side.
+`extractToolCall()` uses the default text-generation pipeline to convert a natural-language request into a JSON tool call. The `tools` array is passed to Transformers.js as a generation option, so Bonsai/Qwen-style chat templates can render their built-in `<tools>` and `<tool_call>` format.
 
 ```ts
 const searchTool = {
@@ -127,7 +127,7 @@ Expected parsed shape:
 }
 ```
 
-For a single tool, `extractToolArguments()` returns only the parsed `arguments` object.
+For a single tool, `extractToolArguments()` returns only the parsed `arguments` object. This is still local model inference, so validate the parsed arguments in your application before executing an operation.
 
 ## Pipeline options
 

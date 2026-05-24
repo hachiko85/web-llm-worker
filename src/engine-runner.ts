@@ -26,8 +26,8 @@ const createMockResult = async (message: EngineRunMessage, post: ProgressPost) =
   const lower = inputText.toLowerCase();
 
   let generated = "Mock response from the singleton Bonsai backend.";
-  if (lower.includes("function-style tool call") || lower.includes('"keyword"')) {
-    generated = JSON.stringify({
+  if (Array.isArray(message.generationOptions?.tools)) {
+    generated = `<tool_call>\n${JSON.stringify({
       name: "searchArticles",
       arguments: {
         keyword: "祭り",
@@ -35,7 +35,7 @@ const createMockResult = async (message: EngineRunMessage, post: ProgressPost) =
         "ins-to": "2026-03-03",
         tags: ["記事"]
       }
-    });
+    })}\n</tool_call>`;
   } else if (lower.includes("推論してください") || lower.includes("infer the following")) {
     generated = "推論: 与えられた条件から、最も自然な次の一手を選びます。";
   } else if (lower.includes("summarization engine") || lower.includes("summarize the following")) {

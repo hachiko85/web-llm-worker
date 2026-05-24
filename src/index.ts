@@ -471,6 +471,11 @@ const findJsonCandidate = (text: string) => {
 
 const parseJsonOutput = (raw: string) => JSON.parse(findJsonCandidate(raw)) as JsonValue;
 
+const extractToolCallPayload = (raw: string) => {
+  const match = raw.match(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/i);
+  return match?.[1]?.trim() || raw;
+};
+
 const toArgumentsObject = (value: unknown): Record<string, JsonValue> => {
   const parsed = typeof value === "string" ? JSON.parse(value) : value;
   if (!isRecord(parsed)) {
@@ -769,20 +774,17 @@ export class RewriteLLM {
         {
           role: "system",
           content: systemPrompt || [
-            "You convert natural language into exactly one function-style tool call.",
-            "Return only valid JSON. Do not use markdown, comments, or explanatory text.",
-            'The JSON shape must be {"name":"tool_name","arguments":{}}.',
+            "You choose exactly one available tool for the user request.",
             "Use the provided JSON schemas and enum values exactly.",
-            "Resolve relative dates against the provided current date and output dates as YYYY-MM-DD."
+            "Resolve relative dates against the provided current date and output dates as YYYY-MM-DD.",
+            "Return only the tool call in the format required by the model chat template."
           ].join("\n")
         },
         {
           role: "user",
           content: [
             `Current date: ${currentDate}`,
-            "Tools:",
-            JSON.stringify(normalizedTools, null, 2),
-            "Natural language request:",
+            "Request:",
             input
           ].join("\n\n")
         }
@@ -791,12 +793,13 @@ export class RewriteLLM {
         max_new_tokens: 256,
         do_sample: false,
         return_full_text: false,
+        tools: normalizedTools,
         ...generationOptions
       },
       runtime
     );
     const raw = extractGeneratedText(result);
-    return normalizeToolCallResult(parseJsonOutput(raw), raw);
+    return normalizeToolCallResult(parseJsonOutput(extractToolCallPayload(raw)), raw);
   }
 
   async extractToolArguments(

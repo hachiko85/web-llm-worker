@@ -185,7 +185,7 @@ const translated = await llm.translate("今日は良い天気です。", {
 
 ### `extractToolCall(input, tools, options?, runtime?)`
 
-function calling に近い形で、自然言語からツール名と引数 JSON を作ります。実際には Transformers.js の `text-generation` に tools/schema をプロンプトとして渡し、返ってきた JSON をパースします。
+function calling に近い形で、自然言語からツール名と引数 JSON を作ります。`tools` は Transformers.js の `text-generation` へ generation option として渡され、Bonsai/Qwen 系の `chat_template.jinja` に内蔵された `<tools>` / `<tool_call>` フォーマットが使われます。
 
 ```ts
 const searchTool = {
@@ -263,8 +263,8 @@ const args = await llm.extractToolArguments(
 
 注意点:
 
-- 本物のネイティブ function calling ではなく、ローカル LLM に JSON 出力を促すヘルパーです。
-- モデル出力に前後の説明や `json` code fence が混ざった場合でも、最初の JSON オブジェクトを抽出してパースします。
+- クラウド API のネイティブ function calling ではありませんが、モデルの chat template が持つ tool-use 形式を利用します。
+- モデル出力に `<tool_call>` タグ、前後の説明、または `json` code fence が混ざった場合でも、最初の JSON オブジェクトを抽出してパースします。
 - enum や required はプロンプト上の制約です。厳密な業務バリデーションが必要な場合は、返却後にアプリ側でも検証してください。
 
 ### `state()`
