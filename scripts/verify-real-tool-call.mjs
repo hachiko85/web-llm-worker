@@ -127,9 +127,25 @@ try {
       }
     );
 
+    const unrelated = await llm.tryExtractToolCall(
+      "カレーの作り方を教えて",
+      searchTool,
+      {
+        currentDate: "2026-05-25",
+        toolMode: "auto",
+        max_new_tokens: 192,
+        do_sample: false,
+        return_full_text: false
+      },
+      {
+        timeoutMs: 20 * 60 * 1000
+      }
+    );
+
     return {
       parseChecks,
-      call
+      call,
+      unrelated
     };
   });
 
@@ -166,6 +182,12 @@ try {
     if (result.parseChecks[key]?.name !== "ToolCallParseError") {
       throw new Error(`Parser failure case "${key}" did not return ToolCallParseError.`);
     }
+  }
+  if (result.unrelated.ok !== false) {
+    throw new Error(`Unrelated prompt unexpectedly returned a tool call: ${JSON.stringify(result.unrelated)}`);
+  }
+  if (!result.unrelated.message || result.unrelated.message.length < 10) {
+    throw new Error("Unrelated prompt did not return a useful guidance message.");
   }
 } finally {
   await browser.close();

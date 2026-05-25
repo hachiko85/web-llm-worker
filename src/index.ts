@@ -20,6 +20,7 @@ import {
   type RewriteLLMTool,
   type RunRuntimeOptions,
   type SummarizeOptions,
+  type ToolCallAttemptResult,
   type ToolCallOptions,
   type ToolCallResult,
   type TranslateOptions,
@@ -49,6 +50,7 @@ export {
   type RewriteLLMTool,
   type RunRuntimeOptions,
   type SummarizeOptions,
+  type ToolCallAttemptResult,
   type ToolCallOptions,
   type ToolCallResult,
   type ToolParameterSchema,
@@ -560,6 +562,25 @@ const parseToolCallResult = (raw: string, expectedNames: Set<string>): ToolCallR
   }
 };
 
+const parseAutoGateResult = (raw: string) => {
+  try {
+    const parsed = parseJsonOutput(raw);
+    if (isRecord(parsed) && typeof parsed.useTool === "boolean") {
+      return {
+        useTool: parsed.useTool,
+        message: typeof parsed.message === "string" ? parsed.message : raw
+      };
+    }
+  } catch {
+    // Fall through to treating the raw model text as a non-tool guidance message.
+  }
+
+  return {
+    useTool: false,
+    message: raw
+  };
+};
+
 const currentLocalDate = () => {
   const now = new Date();
   const year = now.getFullYear();
@@ -567,6 +588,39 @@ const currentLocalDate = () => {
   const date = String(now.getDate()).padStart(2, "0");
   return `${year}-${month}-${date}`;
 };
+
+const toolSystemPrompt = (mode: "required" | "auto") => {
+  const common = [
+    "Use the provided JSON schemas and enum values exactly.",
+    "Field descriptions are binding constraints; apply any normalization examples exactly.",
+    "When the request explicitly contains an enum value, select that exact enum value.",
+    "Resolve relative dates against the provided current date and output dates as YYYY-MM-DD."
+  ];
+
+  if (mode === "auto") {
+    return [
+      "You help users configure search/filter conditions.",
+      "Call a tool only when the user request clearly maps to the provided search/filter schema.",
+      "If the request is unrelated to that schema or lacks required conditions, do not call any tool.",
+      "When you do not call a tool, answer in Japanese and explain what condition is missing or how the user should specify it.",
+      ...common
+    ].join("\n");
+  }
+
+  return [
+    "You choose exactly one available tool for the user request.",
+    ...common,
+    "Return only the tool call in the format required by the model chat template."
+  ].join("\n");
+};
+
+const autoGateSystemPrompt = [
+  "You decide whether a user request should configure article search/filter conditions.",
+  "Return only valid JSON with this shape: {\"useTool\": boolean, \"message\": string}.",
+  "Set useTool to true only if the user clearly asks to search, find, filter, or configure conditions for articles, news, announcements, or published content.",
+  "Set useTool to false for cooking, weather, email, general chat, or any request unrelated to article search conditions.",
+  "When useTool is false, set message exactly to: このツールでは記事検索条件のみ設定できます。検索したいキーワード、掲載日の開始日と終了日、タグ（報知・記事・お知らせ）を指定してください。"
+].join("\n");
 
 const collectPageMetrics = async (): Promise<MemoryMetricSnapshot> => {
   const performanceWithMemory = performance as Performance & {
@@ -805,27 +859,71 @@ export class RewriteLLM {
     options: ToolCallOptions = {},
     runtime: RunRuntimeOptions = {}
   ) {
+    const attempt = await this.tryExtractToolCall(input, tools, options, runtime);
+    if (attempt.ok) {
+      return attempt.call;
+    }
+    throw new ToolCallParseError(attempt.reason, attempt.raw);
+  }
+
+  async tryExtractToolCall(
+    input: string,
+    tools: RewriteLLMTool | RewriteLLMTool[],
+    options: ToolCallOptions = {},
+    runtime: RunRuntimeOptions = {}
+  ): Promise<ToolCallAttemptResult> {
     const normalizedTools = normalizeTools(tools);
     const expectedNames = new Set(normalizedTools.map((tool) => tool.function.name));
     const currentDate = options.currentDate || currentLocalDate();
     const {
       currentDate: _currentDate,
       systemPrompt,
+      toolMode = "required",
       ...generationOptions
     } = options;
+
+    if (toolMode === "auto") {
+      const gateResult = await this.run(
+        [
+          {
+            role: "system",
+            content: autoGateSystemPrompt
+          },
+          {
+            role: "user",
+            content: [
+              `Current date: ${currentDate}`,
+              "Available search/filter tools:",
+              JSON.stringify(normalizedTools, null, 2),
+              "Request:",
+              input
+            ].join("\n\n")
+          }
+        ],
+        {
+          max_new_tokens: 192,
+          do_sample: false,
+          return_full_text: false
+        },
+        runtime
+      );
+      const rawGate = extractGeneratedText(gateResult);
+      const gate = parseAutoGateResult(rawGate);
+      if (!gate.useTool) {
+        return {
+          ok: false,
+          message: gate.message,
+          raw: rawGate,
+          reason: "request did not match the provided search/filter tool"
+        };
+      }
+    }
 
     const result = await this.run(
       [
         {
           role: "system",
-          content: systemPrompt || [
-            "You choose exactly one available tool for the user request.",
-            "Use the provided JSON schemas and enum values exactly.",
-            "Field descriptions are binding constraints; apply any normalization examples exactly.",
-            "When the request explicitly contains an enum value, select that exact enum value.",
-            "Resolve relative dates against the provided current date and output dates as YYYY-MM-DD.",
-            "Return only the tool call in the format required by the model chat template."
-          ].join("\n")
+          content: systemPrompt || toolSystemPrompt(toolMode)
         },
         {
           role: "user",
@@ -846,7 +944,23 @@ export class RewriteLLM {
       runtime
     );
     const raw = extractGeneratedText(result);
-    return parseToolCallResult(raw, expectedNames);
+    try {
+      return {
+        ok: true,
+        call: parseToolCallResult(raw, expectedNames),
+        raw
+      };
+    } catch (error) {
+      if (toolMode === "auto" && error instanceof ToolCallParseError) {
+        return {
+          ok: false,
+          message: raw,
+          raw,
+          reason: error.reason
+        };
+      }
+      throw error;
+    }
   }
 
   async extractToolArguments(

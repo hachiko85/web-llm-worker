@@ -1,5 +1,5 @@
-import { type BackendState, type GenerationOptions, type JsonValue, type MetricsOptions, type ModelSourceConfig, type PipelineInput, type PipelineOptions, type PipelineTask, type RewriteLLMConfig, type RewriteLLMMetrics, type RewriteLLMTool, type RunRuntimeOptions, type SummarizeOptions, type ToolCallOptions, type ToolCallResult, type TranslateOptions, type WorkerPersistenceConfig, type WorkerReloadStatus } from "./types";
-export { DEFAULT_ALIAS, DEFAULT_MODEL, DEFAULT_TASK, type BackendState, type ChatMessage, type GenerationOptions, type JsonValue, type MemoryMetricSnapshot, type MetricsOptions, type ModelSourceConfig, type PipelineInput, type PipelineOptions, type PipelineTask, type ProgressEvent, type RewriteLLMConfig, type RewriteLLMGlobalConfig, type RewriteLLMMetrics, type RewriteLLMTool, type RunRuntimeOptions, type SummarizeOptions, type ToolCallOptions, type ToolCallResult, type ToolParameterSchema, type TranslateOptions, type WorkerPersistenceConfig, type WorkerReloadStatus } from "./types";
+import { type BackendState, type GenerationOptions, type JsonValue, type MetricsOptions, type ModelSourceConfig, type PipelineInput, type PipelineOptions, type PipelineTask, type RewriteLLMConfig, type RewriteLLMMetrics, type RewriteLLMTool, type RunRuntimeOptions, type SummarizeOptions, type ToolCallAttemptResult, type ToolCallOptions, type ToolCallResult, type TranslateOptions, type WorkerPersistenceConfig, type WorkerReloadStatus } from "./types";
+export { DEFAULT_ALIAS, DEFAULT_MODEL, DEFAULT_TASK, type BackendState, type ChatMessage, type GenerationOptions, type JsonValue, type MemoryMetricSnapshot, type MetricsOptions, type ModelSourceConfig, type PipelineInput, type PipelineOptions, type PipelineTask, type ProgressEvent, type RewriteLLMConfig, type RewriteLLMGlobalConfig, type RewriteLLMMetrics, type RewriteLLMTool, type RunRuntimeOptions, type SummarizeOptions, type ToolCallAttemptResult, type ToolCallOptions, type ToolCallResult, type ToolParameterSchema, type TranslateOptions, type WorkerPersistenceConfig, type WorkerReloadStatus } from "./types";
 export declare class ToolCallParseError extends Error {
     readonly raw: string;
     readonly reason: string;
@@ -33,6 +33,7 @@ export declare class RewriteLLM {
     summarize(text: string, options?: SummarizeOptions, runtime?: RunRuntimeOptions): Promise<string>;
     translate(text: string, options?: TranslateOptions, runtime?: RunRuntimeOptions): Promise<string>;
     extractToolCall(input: string, tools: RewriteLLMTool | RewriteLLMTool[], options?: ToolCallOptions, runtime?: RunRuntimeOptions): Promise<ToolCallResult>;
+    tryExtractToolCall(input: string, tools: RewriteLLMTool | RewriteLLMTool[], options?: ToolCallOptions, runtime?: RunRuntimeOptions): Promise<ToolCallAttemptResult>;
     extractToolArguments(input: string, tool: RewriteLLMTool, options?: ToolCallOptions, runtime?: RunRuntimeOptions): Promise<Record<string, JsonValue>>;
 }
 //# sourceMappingURL=index.d.ts.map

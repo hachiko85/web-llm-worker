@@ -129,6 +129,25 @@ Expected parsed shape:
 
 For a single tool, `extractToolArguments()` returns only the parsed `arguments` object. This is still local model inference, so validate the parsed arguments in your application before executing an operation.
 
+Use `tryExtractToolCall()` with `toolMode: "auto"` when the model should return a normal guidance message instead of forcing a tool call for unrelated requests. In this mode, RewriteLLM first asks Bonsai whether the request applies to the provided search/filter tool, then runs the tools chat template only when applicable.
+
+```ts
+const result = await llm.tryExtractToolCall(
+  "カレーの作り方を教えて",
+  searchTool,
+  {
+    currentDate: "2026-05-25",
+    toolMode: "auto"
+  }
+);
+
+if (result.ok) {
+  runSearch(result.call.arguments);
+} else {
+  console.log(result.message);
+}
+```
+
 If the model returns normal text, malformed JSON, or an unknown tool name, `extractToolCall()` throws `ToolCallParseError`. The error exposes `reason` and `raw` so the application can log or display the failed model response.
 
 ```ts

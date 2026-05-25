@@ -136,6 +136,7 @@ export type GenerationOptions = Record<string, unknown>;
 export type ToolCallOptions = GenerationOptions & {
   currentDate?: string;
   systemPrompt?: string;
+  toolMode?: "required" | "auto";
 };
 
 export type ToolCallResult = {
@@ -143,6 +144,19 @@ export type ToolCallResult = {
   arguments: Record<string, JsonValue>;
   raw: string;
 };
+
+export type ToolCallAttemptResult =
+  | {
+      ok: true;
+      call: ToolCallResult;
+      raw: string;
+    }
+  | {
+      ok: false;
+      message: string;
+      raw: string;
+      reason: string;
+    };
 
 export type ModelSourceConfig = {
   remoteHost?: string;

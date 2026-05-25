@@ -261,6 +261,37 @@ const args = await llm.extractToolArguments(
 );
 ```
 
+### `tryExtractToolCall(input, tools, options?, runtime?)`
+
+検索条件設定に該当する場合だけ tool call を返し、該当しない場合は通常メッセージを返したい場合に使います。`toolMode: "auto"` では、まず tools なしで適用可否を判定し、該当する場合だけ Bonsai の tools chat template で tool call を実行します。
+
+```ts
+const result = await llm.tryExtractToolCall(
+  "カレーの作り方を教えて",
+  searchTool,
+  {
+    currentDate: "2026-05-25",
+    toolMode: "auto"
+  }
+);
+
+if (result.ok) {
+  runSearch(result.call.arguments);
+} else {
+  console.log(result.message);
+}
+```
+
+実 Bonsai での該当外プロンプトの返却例:
+
+```json
+{
+  "ok": false,
+  "message": "このツールでは記事検索条件のみ設定できます。検索したいキーワード、掲載日の開始日と終了日、タグ（報知・記事・お知らせ）を指定してください。",
+  "reason": "request did not match the provided search/filter tool"
+}
+```
+
 ### tool call の失敗処理
 
 `extractToolCall()` は、モデルが `<tool_call>` 形式または同等の JSON tool call を返し、かつ JSON パースとツール名検証に成功した場合だけ成功します。通常文、壊れた JSON、未定義のツール名は `ToolCallParseError` として失敗します。
