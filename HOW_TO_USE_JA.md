@@ -346,6 +346,34 @@ console.log(metrics.reloadStatus);
 
 Chrome でも worker 側の JS heap が公開されないことがあります。その場合は `n/a` 相当になり、`notes` に理由が入ります。WebGPU の GPU メモリ使用量は標準 Web API では直接取得できません。
 
+返却される主な情報:
+
+- `state`: broker/worker の状態、queue、running、completedJobs、completedJobsSinceRestart、persistence 設定、WebGPU 可否
+- `worker`: worker 側で取得できた JS heap、deviceMemory、storage estimate、crossOriginIsolated、notes
+- `page`: ページ側で取得できた JS heap、userAgentSpecificMemory、deviceMemory、storage estimate、crossOriginIsolated、notes
+- `reloadStatus`: 再起動推奨の有無、理由、現在の completedJobsSinceRestart
+
+CPU 使用率や GPU 使用率は、標準ブラウザ API では直接取得できません。GPU メモリ使用量も同様です。クライアント側では、取得可能な `usedJSHeapSize / jsHeapSizeLimit`、`storageUsage / storageQuota`、`completedJobsSinceRestart / maxCompletedJobsBeforeReload`、`reloadStatus.recommended` を監視用の代替シグナルとして使います。
+
+デモサイトでは以下のようなメーター表示を組み込んでいます。
+
+```ts
+const metrics = await llm.metrics();
+const workerRatio = metrics.worker.usedJSHeapSize && metrics.worker.jsHeapSizeLimit
+  ? metrics.worker.usedJSHeapSize / metrics.worker.jsHeapSizeLimit
+  : undefined;
+
+const storageRatio = metrics.worker.storageUsage && metrics.worker.storageQuota
+  ? metrics.worker.storageUsage / metrics.worker.storageQuota
+  : undefined;
+
+const reloadRisk = metrics.state.persistence.maxCompletedJobsBeforeReload
+  ? metrics.state.completedJobsSinceRestart / metrics.state.persistence.maxCompletedJobsBeforeReload
+  : undefined;
+```
+
+閾値を超えた場合は UI 側で `warning` / `danger` として色を変えます。デモサイトでは `Auto monitor` を有効にすると3秒ごとに `llm.metrics()` を呼びます。
+
 ### `reloadStatus()`
 
 永続化 worker を再起動すべきかどうかを返します。

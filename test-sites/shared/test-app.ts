@@ -44,6 +44,10 @@ app.innerHTML = `
           <input data-mock type="checkbox" checked />
           <span>Mock mode</span>
         </label>
+        <label class="toggle">
+          <input data-auto-monitor type="checkbox" checked />
+          <span>Auto monitor</span>
+        </label>
       </div>
 
       <div class="panel output-panel">
@@ -133,6 +137,40 @@ app.innerHTML = `
           <strong data-isolation>n/a</strong>
         </div>
       </div>
+      <div class="monitor-grid">
+        <div class="meter" data-meter="worker-heap">
+          <div class="meter-top">
+            <span>worker heap pressure</span>
+            <strong data-meter-value>n/a</strong>
+          </div>
+          <div class="meter-track"><span data-meter-bar></span></div>
+          <small data-meter-detail>Waiting for worker metrics.</small>
+        </div>
+        <div class="meter" data-meter="page-heap">
+          <div class="meter-top">
+            <span>page heap pressure</span>
+            <strong data-meter-value>n/a</strong>
+          </div>
+          <div class="meter-track"><span data-meter-bar></span></div>
+          <small data-meter-detail>Waiting for page metrics.</small>
+        </div>
+        <div class="meter" data-meter="storage">
+          <div class="meter-top">
+            <span>storage pressure</span>
+            <strong data-meter-value>n/a</strong>
+          </div>
+          <div class="meter-track"><span data-meter-bar></span></div>
+          <small data-meter-detail>Waiting for storage estimate.</small>
+        </div>
+        <div class="meter" data-meter="jobs">
+          <div class="meter-top">
+            <span>reload pressure</span>
+            <strong data-meter-value>n/a</strong>
+          </div>
+          <div class="meter-track"><span data-meter-bar></span></div>
+          <small data-meter-detail>Waiting for job counters.</small>
+        </div>
+      </div>
       <pre data-metrics-notes>No metrics sampled yet.</pre>
     </section>
   </main>
@@ -141,6 +179,7 @@ app.innerHTML = `
 const input = app.querySelector<HTMLTextAreaElement>("[data-input]")!;
 const output = app.querySelector<HTMLElement>("[data-output]")!;
 const mock = app.querySelector<HTMLInputElement>("[data-mock]")!;
+const autoMonitor = app.querySelector<HTMLInputElement>("[data-auto-monitor]")!;
 const running = app.querySelector<HTMLElement>("[data-running]")!;
 const webgpu = app.querySelector<HTMLElement>('[data-status="webgpu"]')!;
 const broker = app.querySelector<HTMLElement>('[data-status="broker"]')!;
@@ -165,6 +204,12 @@ const storageUsage = app.querySelector<HTMLElement>("[data-storage-usage]")!;
 const storageQuota = app.querySelector<HTMLElement>("[data-storage-quota]")!;
 const isolation = app.querySelector<HTMLElement>("[data-isolation]")!;
 const metricsNotes = app.querySelector<HTMLElement>("[data-metrics-notes]")!;
+const meters = {
+  workerHeap: app.querySelector<HTMLElement>('[data-meter="worker-heap"]')!,
+  pageHeap: app.querySelector<HTMLElement>('[data-meter="page-heap"]')!,
+  storage: app.querySelector<HTMLElement>('[data-meter="storage"]')!,
+  jobs: app.querySelector<HTMLElement>('[data-meter="jobs"]')!
+};
 
 const llm = new RewriteLLM({
   mock: true,
@@ -257,9 +302,48 @@ const metricNotes = (label: string, snapshot?: MemoryMetricSnapshot) => {
   return notes.map((note) => `${label}: ${note}`);
 };
 
+const ratioText = (ratio?: number) => (
+  Number.isFinite(ratio) ? `${Math.round((ratio || 0) * 100)}%` : "n/a"
+);
+
+const metricRatio = (used?: number, limit?: number) => (
+  used !== undefined && limit && limit > 0 ? used / limit : undefined
+);
+
+const paintMeter = (
+  meter: HTMLElement,
+  ratio: number | undefined,
+  detail: string,
+  warningAt = 0.7,
+  dangerAt = 0.85
+) => {
+  const value = meter.querySelector<HTMLElement>("[data-meter-value]")!;
+  const bar = meter.querySelector<HTMLElement>("[data-meter-bar]")!;
+  const detailEl = meter.querySelector<HTMLElement>("[data-meter-detail]")!;
+  const bounded = Number.isFinite(ratio) ? Math.min(Math.max(ratio || 0, 0), 1) : 0;
+
+  meter.dataset.level = !Number.isFinite(ratio)
+    ? "unknown"
+    : bounded >= dangerAt
+      ? "danger"
+      : bounded >= warningAt
+        ? "warning"
+        : "ok";
+  value.textContent = ratioText(ratio);
+  bar.style.width = `${Math.round(bounded * 100)}%`;
+  detailEl.textContent = detail;
+};
+
 const paintMetrics = (metrics: RewriteLLMMetrics) => {
   const worker = metrics.worker;
   const page = metrics.page;
+  const state = metrics.state;
+  const workerHeapRatio = metricRatio(worker.usedJSHeapSize, worker.jsHeapSizeLimit);
+  const pageHeapRatio = metricRatio(page?.usedJSHeapSize, page?.jsHeapSizeLimit);
+  const storageRatio = metricRatio(worker.storageUsage ?? page?.storageUsage, worker.storageQuota ?? page?.storageQuota);
+  const jobLimit = state.persistence.maxCompletedJobsBeforeReload || 0;
+  const jobRatio = jobLimit > 0 ? state.completedJobsSinceRestart / jobLimit : undefined;
+
   paintState(metrics.state);
   metricsTime.textContent = new Date(worker.capturedAt).toLocaleTimeString();
   workerHeapUsed.textContent = formatBytes(worker.usedJSHeapSize);
@@ -272,8 +356,45 @@ const paintMetrics = (metrics: RewriteLLMMetrics) => {
   storageQuota.textContent = formatBytes(worker.storageQuota ?? page?.storageQuota);
   isolation.textContent = `worker: ${worker.crossOriginIsolated ? "isolated" : "not isolated"} / page: ${page?.crossOriginIsolated ? "isolated" : "not isolated"}`;
   reload.textContent = metrics.reloadStatus.recommended ? `${metrics.reloadStatus.level}: ${metrics.reloadStatus.reasons.join(", ")}` : metrics.reloadStatus.level;
+  paintMeter(
+    meters.workerHeap,
+    workerHeapRatio,
+    workerHeapRatio === undefined
+      ? "performance.memory is usually unavailable inside workers."
+      : `${formatBytes(worker.usedJSHeapSize)} / ${formatBytes(worker.jsHeapSizeLimit)}`,
+    state.persistence.usedHeapRatioThreshold ? state.persistence.usedHeapRatioThreshold * 0.85 : 0.7,
+    state.persistence.usedHeapRatioThreshold || 0.85
+  );
+  paintMeter(
+    meters.pageHeap,
+    pageHeapRatio,
+    pageHeapRatio === undefined
+      ? "Page heap metrics are browser-dependent."
+      : `${formatBytes(page?.usedJSHeapSize)} / ${formatBytes(page?.jsHeapSizeLimit)}`,
+    0.7,
+    0.85
+  );
+  paintMeter(
+    meters.storage,
+    storageRatio,
+    storageRatio === undefined
+      ? "Storage estimate is not available in this context."
+      : `${formatBytes(worker.storageUsage ?? page?.storageUsage)} / ${formatBytes(worker.storageQuota ?? page?.storageQuota)}`,
+    state.persistence.storageUsageRatioThreshold ? state.persistence.storageUsageRatioThreshold * 0.85 : 0.75,
+    state.persistence.storageUsageRatioThreshold || 0.9
+  );
+  paintMeter(
+    meters.jobs,
+    jobRatio,
+    jobLimit > 0
+      ? `${state.completedJobsSinceRestart} / ${jobLimit} jobs before reload recommendation`
+      : "No job-count reload threshold configured.",
+    0.7,
+    1
+  );
   metricsNotes.textContent = [
     `reload: ${metrics.reloadStatus.recommended ? metrics.reloadStatus.reasons.join("; ") : "not recommended"}`,
+    "cpu/gpu utilization: not exposed by standard browser APIs; use reload pressure and memory/storage estimates as browser-side signals.",
     ...metricNotes("worker", worker),
     ...metricNotes("page", page)
   ].join("\n");
@@ -358,3 +479,9 @@ void llm.ready().then((state) => {
   paintState(state);
   void refreshMetrics();
 });
+
+window.setInterval(() => {
+  if (autoMonitor.checked && document.visibilityState === "visible") {
+    void refreshMetrics();
+  }
+}, 3000);

@@ -291,6 +291,32 @@ console.log(metrics.worker.deviceMemoryGB);
 
 Browser memory APIs are intentionally limited. In Chromium, `performance.memory` may expose JS heap usage and heap limit. When available, `performance.measureUserAgentSpecificMemory()` is also sampled from the page context. Other browsers may return `n/a`, in which case the metrics object includes explanatory notes. GPU memory used by WebGPU is not directly exposed by standard browser APIs.
 
+The metrics object contains:
+
+- `state`: broker state, queue/running flags, completed jobs, persistence thresholds, and WebGPU availability.
+- `worker`: worker-side JS heap, storage estimate, device memory, isolation status, and notes.
+- `page`: page-side JS heap, `measureUserAgentSpecificMemory` when exposed, storage estimate, device memory, and notes.
+- `reloadStatus`: whether a restart is recommended and why.
+
+Browsers do not expose reliable CPU utilization, GPU utilization, or WebGPU memory usage to ordinary pages. Use heap ratio, storage ratio, job-count pressure, and `reloadStatus.recommended` as warning signals.
+
+The demo site renders these as threshold meters and can poll `llm.metrics()` every three seconds:
+
+```ts
+const metrics = await llm.metrics();
+const heapRatio = metrics.page?.usedJSHeapSize && metrics.page.jsHeapSizeLimit
+  ? metrics.page.usedJSHeapSize / metrics.page.jsHeapSizeLimit
+  : undefined;
+
+const storageRatio = metrics.worker.storageUsage && metrics.worker.storageQuota
+  ? metrics.worker.storageUsage / metrics.worker.storageQuota
+  : undefined;
+
+const jobRatio = metrics.state.persistence.maxCompletedJobsBeforeReload
+  ? metrics.state.completedJobsSinceRestart / metrics.state.persistence.maxCompletedJobsBeforeReload
+  : undefined;
+```
+
 ## Runtime behavior
 
 1. Loading `rewrite-llm.js` starts a backend connection for the default alias.

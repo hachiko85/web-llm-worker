@@ -54,6 +54,10 @@ const readPanel = async (page) => ({
   deviceMemory: await page.locator("[data-device-memory]").innerText(),
   storageQuota: await page.locator("[data-storage-quota]").innerText(),
   isolation: await page.locator("[data-isolation]").innerText(),
+  workerHeapPressure: await page.locator('[data-meter="worker-heap"] [data-meter-value]').innerText(),
+  pageHeapPressure: await page.locator('[data-meter="page-heap"] [data-meter-value]').innerText(),
+  storagePressure: await page.locator('[data-meter="storage"] [data-meter-value]').innerText(),
+  reloadPressure: await page.locator('[data-meter="jobs"] [data-meter-value]').innerText(),
   notes: await page.locator("[data-metrics-notes]").innerText()
 });
 
