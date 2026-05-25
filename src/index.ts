@@ -575,6 +575,14 @@ const parseAutoGateResult = (raw: string) => {
     // Fall through to treating the raw model text as a non-tool guidance message.
   }
 
+  const messageMatch = raw.match(/"message"\s*:\s*"?([^"}\n]+)"?/);
+  if (messageMatch?.[1]?.trim()) {
+    return {
+      useTool: false,
+      message: messageMatch[1].trim()
+    };
+  }
+
   return {
     useTool: false,
     message: raw
@@ -599,10 +607,9 @@ const toolSystemPrompt = (mode: "required" | "auto") => {
 
   if (mode === "auto") {
     return [
-      "You help users configure search/filter conditions.",
-      "Call a tool only when the user request clearly maps to the provided search/filter schema.",
-      "If the request is unrelated to that schema or lacks required conditions, do not call any tool.",
-      "When you do not call a tool, answer in Japanese and explain what condition is missing or how the user should specify it.",
+      "You may call one available tool when the user request and caller instructions clearly match the tool schema.",
+      "If no tool is appropriate, do not call any tool and answer normally according to the caller instructions.",
+      "Do not invent required arguments just to force a tool call.",
       ...common
     ].join("\n");
   }
@@ -615,11 +622,12 @@ const toolSystemPrompt = (mode: "required" | "auto") => {
 };
 
 const autoGateSystemPrompt = [
-  "You decide whether a user request should configure article search/filter conditions.",
+  "You decide whether a user request should use one of the provided tools.",
   "Return only valid JSON with this shape: {\"useTool\": boolean, \"message\": string}.",
-  "Set useTool to true only if the user clearly asks to search, find, filter, or configure conditions for articles, news, announcements, or published content.",
-  "Set useTool to false for cooking, weather, email, general chat, or any request unrelated to article search conditions.",
-  "When useTool is false, set message exactly to: このツールでは記事検索条件のみ設定できます。検索したいキーワード、掲載日の開始日と終了日、タグ（報知・記事・お知らせ）を指定してください。"
+  "Use the caller instructions, tool descriptions, and JSON schema descriptions to decide.",
+  "Set useTool to true only if the request should be represented as a tool call with the provided schema.",
+  "Set useTool to false if the request is unrelated, lacks required information, or the caller instructions say the user should be asked for more details.",
+  "When useTool is false, message must be a concise user-facing response that follows the caller instructions and explains the missing or invalid conditions."
 ].join("\n");
 
 const collectPageMetrics = async (): Promise<MemoryMetricSnapshot> => {
@@ -893,7 +901,9 @@ export class RewriteLLM {
             role: "user",
             content: [
               `Current date: ${currentDate}`,
-              "Available search/filter tools:",
+              "Caller instructions:",
+              systemPrompt || toolSystemPrompt(toolMode),
+              "Available tools:",
               JSON.stringify(normalizedTools, null, 2),
               "Request:",
               input

@@ -127,12 +127,21 @@ try {
       }
     );
 
+    const conditionPrompt = [
+      "You are configuring only the provided article search condition tool.",
+      "Call the tool only when the user request can be converted into article search conditions.",
+      "A valid request should provide or imply a search keyword, publication date range, and one of the available tag candidates.",
+      "If the prompt is unrelated to article search conditions, do not call the tool.",
+      "When you do not call the tool, return this exact Japanese message: 記事検索条件を設定するには、検索キーワード、掲載日の開始日と終了日、タグ候補を指定してください。"
+    ].join("\n");
+
     const unrelated = await llm.tryExtractToolCall(
       "カレーの作り方を教えて",
       searchTool,
       {
         currentDate: "2026-05-25",
         toolMode: "auto",
+        systemPrompt: conditionPrompt,
         max_new_tokens: 192,
         do_sample: false,
         return_full_text: false

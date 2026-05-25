@@ -263,15 +263,21 @@ const args = await llm.extractToolArguments(
 
 ### `tryExtractToolCall(input, tools, options?, runtime?)`
 
-検索条件設定に該当する場合だけ tool call を返し、該当しない場合は通常メッセージを返したい場合に使います。`toolMode: "auto"` では、まず tools なしで適用可否を判定し、該当する場合だけ Bonsai の tools chat template で tool call を実行します。
+tool call が適切な場合だけ call を返し、適切でない場合は通常メッセージを返したい場合に使います。`toolMode: "auto"` では、まず caller が渡した `systemPrompt`、tools、JSON schema を使って適用可否を判定し、該当する場合だけ Bonsai の tools chat template で tool call を実行します。
 
 ```ts
+const conditionPrompt = [
+  "記事検索条件を設定できる場合だけ tool を呼んでください。",
+  "検索キーワード、掲載日の範囲、タグ候補に変換できない場合は tool を呼ばず、不足条件を日本語で伝えてください。"
+].join("\n");
+
 const result = await llm.tryExtractToolCall(
   "カレーの作り方を教えて",
   searchTool,
   {
     currentDate: "2026-05-25",
-    toolMode: "auto"
+    toolMode: "auto",
+    systemPrompt: conditionPrompt
   }
 );
 
@@ -287,7 +293,7 @@ if (result.ok) {
 ```json
 {
   "ok": false,
-  "message": "このツールでは記事検索条件のみ設定できます。検索したいキーワード、掲載日の開始日と終了日、タグ（報知・記事・お知らせ）を指定してください。",
+  "message": "記事検索条件を設定するには、検索キーワード、掲載日の範囲、タグ候補を指定してください。",
   "reason": "request did not match the provided search/filter tool"
 }
 ```

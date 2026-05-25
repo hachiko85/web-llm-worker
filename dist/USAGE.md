@@ -129,15 +129,21 @@ Expected parsed shape:
 
 For a single tool, `extractToolArguments()` returns only the parsed `arguments` object. This is still local model inference, so validate the parsed arguments in your application before executing an operation.
 
-Use `tryExtractToolCall()` with `toolMode: "auto"` when the model should return a normal guidance message instead of forcing a tool call for unrelated requests. In this mode, RewriteLLM first asks Bonsai whether the request applies to the provided search/filter tool, then runs the tools chat template only when applicable.
+Use `tryExtractToolCall()` with `toolMode: "auto"` when the model should return a normal guidance message instead of forcing a tool call for unrelated requests. In this mode, RewriteLLM first asks Bonsai whether the request applies to the provided tools and caller instructions, then runs the tools chat template only when applicable.
 
 ```ts
+const conditionPrompt = [
+  "Call the tool only when the user request can be converted into article search conditions.",
+  "If the prompt is unrelated or lacks required conditions, do not call the tool and explain what is missing."
+].join("\n");
+
 const result = await llm.tryExtractToolCall(
   "カレーの作り方を教えて",
   searchTool,
   {
     currentDate: "2026-05-25",
-    toolMode: "auto"
+    toolMode: "auto",
+    systemPrompt: conditionPrompt
   }
 );
 
