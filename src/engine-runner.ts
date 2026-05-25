@@ -26,7 +26,15 @@ const createMockResult = async (message: EngineRunMessage, post: ProgressPost) =
   const lower = inputText.toLowerCase();
 
   let generated = "Mock response from the singleton Bonsai backend.";
-  if (Array.isArray(message.generationOptions?.tools)) {
+  if (inputText.includes("Return only valid JSON with this shape") && inputText.includes("Available tools:")) {
+    const shouldUseTool = !inputText.includes("カレーの作り方");
+    generated = JSON.stringify({
+      useTool: shouldUseTool,
+      message: shouldUseTool
+        ? "OK"
+        : "記事検索条件を設定するには、検索キーワード、掲載日の開始日と終了日、タグ候補を指定してください。"
+    });
+  } else if (Array.isArray(message.generationOptions?.tools)) {
     generated = `<tool_call>\n${JSON.stringify({
       name: "searchArticles",
       arguments: {

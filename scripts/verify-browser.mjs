@@ -35,6 +35,7 @@ const context = await browser.newContext({
 
 const pageA = await context.newPage();
 const pageB = await context.newPage();
+const pageC = await context.newPage();
 const markerUrl = `${baseUrl}/models/onnx-community/Ternary-Bonsai-4B-ONNX/resolve/main/MIRROR_README.txt`;
 
 const readPanel = async (page) => ({
@@ -64,14 +65,18 @@ const readPanel = async (page) => ({
 try {
   await pageA.goto(`${baseUrl}/test-sites/site-a/`);
   await pageB.goto(`${baseUrl}/test-sites/site-b/`);
+  await pageC.goto(`${baseUrl}/test-sites/site-c/`);
   const markerResponse = await pageA.request.get(markerUrl);
   await pageA.waitForLoadState("domcontentloaded");
   await pageB.waitForLoadState("domcontentloaded");
+  await pageC.waitForLoadState("domcontentloaded");
 
   await pageA.locator("[data-broker-id]").waitFor({ state: "visible" });
   await pageB.locator("[data-broker-id]").waitFor({ state: "visible" });
+  await pageC.locator("[data-broker-id]").waitFor({ state: "visible" });
   await pageA.waitForFunction(() => document.querySelector("[data-broker-id]")?.textContent !== "...");
   await pageB.waitForFunction(() => document.querySelector("[data-broker-id]")?.textContent !== "...");
+  await pageC.waitForFunction(() => document.querySelector("[data-broker-id]")?.textContent !== "...");
 
   await pageA.getByRole("button", { name: "メトリクス更新" }).click();
   await pageB.getByRole("button", { name: "メトリクス更新" }).click();
@@ -94,6 +99,28 @@ try {
 
   const siteA = await readPanel(pageA);
   const siteB = await readPanel(pageB);
+  await pageC.locator("[data-tools-valid]").waitFor({ state: "visible" });
+  const siteCBefore = {
+    title: await pageC.title(),
+    toolsValid: await pageC.locator("[data-tools-valid]").innerText(),
+    generationValid: await pageC.locator("[data-generation-valid]").innerText(),
+    runDisabled: await pageC.locator("[data-run]").isDisabled()
+  };
+  await pageC.locator("[data-run]").click();
+  await pageC.waitForFunction(() => {
+    const text = document.querySelector("[data-output]")?.textContent || "";
+    return text.includes('"ok": true') && text.includes('"parsedArguments"');
+  });
+  await pageC.waitForFunction(() => document.querySelector('[data-meter="jobs"] [data-meter-value]')?.textContent !== "n/a");
+  const siteC = {
+    ...siteCBefore,
+    brokerId: await pageC.locator("[data-broker-id]").innerText(),
+    output: await pageC.locator("[data-output]").innerText(),
+    workerHeapPressure: await pageC.locator('[data-meter="worker-heap"] [data-meter-value]').innerText(),
+    pageHeapPressure: await pageC.locator('[data-meter="page-heap"] [data-meter-value]').innerText(),
+    storagePressure: await pageC.locator('[data-meter="storage"] [data-meter-value]').innerText(),
+    reloadPressure: await pageC.locator('[data-meter="jobs"] [data-meter-value]').innerText()
+  };
   await pageA.getByRole("button", { name: "ワーカー再起動" }).click();
   await pageA.waitForFunction(() => document.querySelector("[data-engine-id]")?.textContent === "idle");
   await pageA.waitForFunction(() => document.querySelector("[data-jobs-since-restart]")?.textContent === "0");
@@ -110,10 +137,13 @@ try {
       ok: markerResponse.ok(),
       status: markerResponse.status()
     },
-    sameBroker: siteA.brokerId === siteB.brokerId,
+    sameBroker: siteA.brokerId === siteB.brokerId && siteA.brokerId === siteC.brokerId,
+    siteCReady: siteCBefore.toolsValid.includes("OK") && siteCBefore.generationValid.includes("OK") && !siteCBefore.runDisabled,
+    siteCToolCallWorked: siteC.output.includes('"ok": true') && siteC.output.includes('"parsedArguments"'),
     restartWorked: afterRestart.engineId === "idle" && afterRestart.jobsSinceRestart === "0",
     siteA,
     siteB,
+    siteC,
     afterRestart
   };
 
@@ -123,6 +153,8 @@ try {
     .catch((error) => screenshotWarnings.push(`Site A screenshot skipped: ${error.message}`));
   await pageB.screenshot({ path: join(screenshotDir, "site-b-metrics.png"), fullPage: false, timeout: 10000 })
     .catch((error) => screenshotWarnings.push(`Site B screenshot skipped: ${error.message}`));
+  await pageC.screenshot({ path: join(screenshotDir, "site-c-tool-lab.png"), fullPage: false, timeout: 10000 })
+    .catch((error) => screenshotWarnings.push(`Site C screenshot skipped: ${error.message}`));
 
   console.log(JSON.stringify(result, null, 2));
   if (screenshotWarnings.length > 0) {
@@ -134,6 +166,12 @@ try {
   }
   if (!result.modelMirrorMarker.ok) {
     throw new Error("Same-origin model mirror marker was not served correctly.");
+  }
+  if (!result.siteCReady) {
+    throw new Error("Site C did not validate the default tools and generation JSON.");
+  }
+  if (!result.siteCToolCallWorked) {
+    throw new Error("Site C did not run the default tool-calling flow.");
   }
   if (!siteA.reload.includes("reload")) {
     throw new Error("Reload status did not become recommended after the configured threshold.");

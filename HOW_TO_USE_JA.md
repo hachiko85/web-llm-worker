@@ -406,6 +406,16 @@ npm run serve:test
 http://127.0.0.1:8787/test-sites/
 ```
 
+個別URL:
+
+```text
+http://127.0.0.1:8787/test-sites/site-a/
+http://127.0.0.1:8787/test-sites/site-b/
+http://127.0.0.1:8787/test-sites/site-c/
+```
+
+Site C は tools 推論の検証用です。クライアント側から system prompt、user prompt、tools JSON、generation options JSON を編集できます。tools JSON と generation options JSON が基本的な型チェックに通らない場合は実行ボタンが無効になります。推論中は `llm.metrics()` を短い間隔で呼び、worker heap、page heap、storage、reload pressure をリアルタイムに近い形で表示します。
+
 ブラウザ自動検証:
 
 ```powershell

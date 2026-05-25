@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RewriteLLM A/B singleton test</title>
+    <title>RewriteLLM test sites</title>
     <style>
       :root {
         color: #18232b;
@@ -43,7 +43,7 @@
       .frames {
         display: grid;
         gap: 14px;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         height: calc(100vh - 76px);
         padding: 0 14px 14px;
       }
@@ -76,15 +76,17 @@
   </head>
   <body>
     <header>
-      <h1>RewriteLLM singleton test</h1>
+      <h1>RewriteLLM test sites</h1>
       <nav>
         <a href="/test-sites/site-a/">Site A</a>
         <a href="/test-sites/site-b/">Site B</a>
+        <a href="/test-sites/site-c/">Site C</a>
       </nav>
     </header>
     <div class="frames">
       <iframe title="Site A" src="/test-sites/site-a/"></iframe>
       <iframe title="Site B" src="/test-sites/site-b/"></iframe>
+      <iframe title="Site C" src="/test-sites/site-c/"></iframe>
     </div>
   </body>
 </html>

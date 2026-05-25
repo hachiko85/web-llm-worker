@@ -260,7 +260,9 @@ Open:
 http://127.0.0.1:5173/test-sites/
 ```
 
-The page loads Test Site A and Test Site B side by side. Both should show the same `brokerId` and the client count should increase as both frames connect. The default test UI uses Mock mode so you can verify Worker singleton behavior without downloading the 2.25 GB model. Turn Mock mode off in a WebGPU-capable browser to run the real Bonsai model.
+The page loads Test Site A, Test Site B, and Test Site C side by side. Site A/B verify singleton behavior with the same `brokerId`. Site C is a tool-calling lab where the client can edit the system prompt, user prompt, tools JSON, and generation options JSON. The run button is disabled until the tools and generation JSON pass basic shape validation. During inference, Site C polls `llm.metrics()` and updates memory/storage/reload pressure meters in near real time.
+
+The default test UI uses Mock mode so you can verify Worker singleton behavior without downloading the 2.25 GB model. Turn Mock mode off in a WebGPU-capable browser to run the real Bonsai model.
 
 You can also run the built `dist` project with the standalone Node test server:
 
@@ -276,6 +278,14 @@ http://127.0.0.1:8787/test-sites/
 ```
 
 This server serves `dist` directly and adds COOP/COEP headers for browser-side worker and WebGPU diagnostics.
+
+Direct test site URLs:
+
+```text
+http://127.0.0.1:8787/test-sites/site-a/
+http://127.0.0.1:8787/test-sites/site-b/
+http://127.0.0.1:8787/test-sites/site-c/
+```
 
 ## Metrics
 

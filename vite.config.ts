@@ -15,7 +15,8 @@ export default defineConfig({
         "rewrite-llm": resolvePath("./src/index.ts"),
         "test-sites/index": resolvePath("./test-sites/index.html"),
         "test-sites/site-a/index": resolvePath("./test-sites/site-a/index.html"),
-        "test-sites/site-b/index": resolvePath("./test-sites/site-b/index.html")
+        "test-sites/site-b/index": resolvePath("./test-sites/site-b/index.html"),
+        "test-sites/site-c/index": resolvePath("./test-sites/site-c/index.html")
       },
       output: {
         entryFileNames: (chunk) => {
